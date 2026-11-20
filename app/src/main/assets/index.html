@@ -1,479 +1,1044 @@
-package com.rew733.imageto3d
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Image to 3D Studio</title>
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        :root {
+            --bg: #0f1115;
+            --card: #181b22;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --text: #f3f4f6;
+            --muted: #9ca3af;
+            --border: #2a2f3a;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+        header {
+            padding: 10px 14px;
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+        header h1 { font-size: 0.95rem; font-weight: 700; color: #fff; }
+        .header-actions { display: flex; align-items: center; gap: 6px; }
+        .badge {
+            font-size: 0.68rem;
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            padding: 4px 8px;
+            border-radius: 99px;
+            border: 1px solid rgba(16, 185, 129, 0.35);
+        }
+        .token-btn {
+            background: #262b36;
+            color: #fbbf24;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 4px 8px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .viewer-container {
+            flex: 1;
+            position: relative;
+            background: radial-gradient(circle at center, #1e2430 0%, #0f1115 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        model-viewer, #local3dContainer {
+            width: 100%;
+            height: 100%;
+            display: none;
+        }
+        .placeholder {
+            text-align: center;
+            padding: 20px;
+            max-width: 340px;
+        }
+        .placeholder-icon { font-size: 3rem; margin-bottom: 10px; opacity: 0.85; }
+        .placeholder p { color: var(--muted); font-size: 0.86rem; line-height: 1.55; }
+        .depth-slider-box {
+            position: absolute;
+            bottom: 10px;
+            left: 12px;
+            right: 12px;
+            background: rgba(24, 27, 34, 0.92);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 8px 12px;
+            display: none;
+            flex-direction: column;
+            gap: 6px;
+            z-index: 10;
+        }
+        .slider-row { display: flex; flex-direction: column; gap: 2px; }
+        .depth-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.74rem;
+            color: #d1d5db;
+        }
+        input[type="range"] {
+            width: 100%;
+            accent-color: #10b981;
+            height: 4px;
+        }
+        .toast-banner {
+            position: absolute;
+            top: 10px;
+            left: 12px;
+            right: 12px;
+            background: rgba(30, 41, 59, 0.95);
+            border: 1px solid #3b82f6;
+            color: #e2e8f0;
+            padding: 9px 12px;
+            border-radius: 10px;
+            font-size: 0.76rem;
+            display: none;
+            z-index: 15;
+            text-align: center;
+            line-height: 1.4;
+        }
+        .loader-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(15, 17, 21, 0.9);
+            backdrop-filter: blur(6px);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+            padding: 20px;
+            text-align: center;
+        }
+        .spinner {
+            width: 44px;
+            height: 44px;
+            border: 4px solid rgba(59, 130, 246, 0.2);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+            margin-bottom: 14px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .status-text { font-size: 0.95rem; font-weight: 600; margin-bottom: 6px; }
+        .sub-status { font-size: 0.8rem; color: var(--muted); }
+        .controls {
+            background: var(--card);
+            border-top: 1px solid var(--border);
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .quad-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+        }
+        .side-card {
+            background: #12151b;
+            border: 1px solid #2d3442;
+            border-radius: 10px;
+            padding: 6px 4px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            transition: 0.15s;
+        }
+        .side-card.loaded {
+            border-color: #10b981;
+            background: rgba(16, 185, 129, 0.08);
+        }
+        .side-card img {
+            width: 36px;
+            height: 36px;
+            object-fit: contain;
+            background: repeating-conic-gradient(#1f2937 0% 25%, #111827 0% 50%) 50% / 8px 8px;
+            border-radius: 6px;
+            display: none;
+        }
+        .side-icon { font-size: 1.15rem; height: 36px; display: flex; align-items: center; }
+        .side-title { font-size: 0.72rem; font-weight: 600; color: #e5e7eb; }
+        .side-status { font-size: 0.62rem; color: #9ca3af; }
+        .side-card.loaded .side-status { color: #34d399; }
 
-import android.annotation.SuppressLint
-import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Color
-import android.net.Uri
-import android.os.Bundle
-import android.util.Base64
-import android.view.View
-import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import androidx.activity.OnBackPressedCallback
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.segmentation.Segmentation
-import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.ByteArrayOutputStream
-import java.io.DataOutputStream
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.UUID
+        .btn-row { display: flex; gap: 7px; align-items: center; }
+        .isolate-toggle {
+            background: #1e293b;
+            color: #38bdf8;
+            border: 1px solid #0284c7;
+            padding: 10px 9px;
+            border-radius: 11px;
+            font-size: 0.74rem;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .btn {
+            flex: 1;
+            padding: 11px 8px;
+            border: none;
+            border-radius: 11px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            transition: 0.2s;
+        }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-instant { background: #10b981; color: #fff; }
+        .btn-secondary { background: #262b36; color: #fff; border: 1px solid var(--border); }
+        .btn:disabled { opacity: 0.45; pointer-events: none; }
 
-class MainActivity : AppCompatActivity() {
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.78);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            padding: 20px;
+        }
+        .modal-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 18px;
+            width: 100%;
+            max-width: 360px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .modal-card h3 { font-size: 1rem; color: #fff; }
+        .modal-card p { font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
+        .modal-card input {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: #0f1115;
+            color: #fff;
+            font-size: 0.85rem;
+            direction: ltr;
+        }
+    </style>
+</head>
+<body>
 
-    private lateinit var webView: WebView
-    private lateinit var pickMediaLauncher: ActivityResultLauncher<PickVisualMediaRequest>
-    private var currentFrontBytes: ByteArray? = null
-    private var pendingTargetSide: String = "front" // "front", "back", "right", "left"
-    private val sideUris = mutableMapOf<String, Uri>()
-    private var autoIsolateEnabled: Boolean = true
+<header>
+    <h1>استوديو التحويل إلى 3D</h1>
+    <div class="header-actions">
+        <button id="openTokenBtn" class="token-btn">🔑 HF Token</button>
+        <span class="badge">Quad-View • v5.0</span>
+    </div>
+</header>
 
-    private val segmenter by lazy {
-        val options = SelfieSegmenterOptions.Builder()
-            .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
-            .enableRawSizeMask()
-            .build()
-        Segmentation.getClient(options)
+<div class="viewer-container">
+    <div class="toast-banner" id="toastBanner"></div>
+
+    <div class="placeholder" id="placeholderBox">
+        <div class="placeholder-icon">🧍‍♂️</div>
+        <p>ارفع صور الجهات الأربع (<b>الأمام، الخلف، اليمين، اليسار</b>)؛ سيحسب المحرك السُمك الحقيقي من الجانبين ويمزج الألوان من كل الزوايا <b>360°</b> بلا فواصل!</p>
+    </div>
+
+    <model-viewer id="modelViewer"
+        camera-controls
+        auto-rotate
+        shadow-intensity="1"
+        exposure="1.1"
+        environment-image="neutral">
+    </model-viewer>
+
+    <div id="local3dContainer"></div>
+
+    <div class="depth-slider-box" id="depthControlBox">
+        <div class="slider-row">
+            <div class="depth-header">
+                <span>سُمك وبروز المجسم (3D Depth Scale)</span>
+                <span id="depthVal">60%</span>
+            </div>
+            <input type="range" id="depthRange" min="10" max="100" value="60">
+        </div>
+        <div class="slider-row">
+            <div class="depth-header">
+                <span>تنظيف وقص الحواف (Edge Trim)</span>
+                <span id="trimVal">55%</span>
+            </div>
+            <input type="range" id="trimRange" min="10" max="95" value="55">
+        </div>
+    </div>
+
+    <div class="loader-overlay" id="loaderOverlay">
+        <div class="spinner"></div>
+        <div class="status-text" id="statusTitle">جاري الاتصال بالسحابة...</div>
+        <div class="sub-status" id="statusSub">يتم الآن بناء المجسم الهندسي 360°</div>
+    </div>
+</div>
+
+<div class="controls">
+    <!-- تبويبات الجهات الأربع -->
+    <div class="quad-grid">
+        <div class="side-card" id="card-front" onclick="selectSide('front')">
+            <div class="side-icon" id="icon-front">📷</div>
+            <img id="thumb-front" src="" alt="الأمام">
+            <div class="side-title">الأمام</div>
+            <div class="side-status" id="status-front">اضغط للرفع</div>
+        </div>
+
+        <div class="side-card" id="card-back" onclick="selectSide('back')">
+            <div class="side-icon" id="icon-back">🔄</div>
+            <img id="thumb-back" src="" alt="الخلف">
+            <div class="side-title">الخلف</div>
+            <div class="side-status" id="status-back">اختياري</div>
+        </div>
+
+        <div class="side-card" id="card-right" onclick="selectSide('right')">
+            <div class="side-icon" id="icon-right">➡️</div>
+            <img id="thumb-right" src="" alt="اليمين">
+            <div class="side-title">اليمين</div>
+            <div class="side-status" id="status-right">اختياري</div>
+        </div>
+
+        <div class="side-card" id="card-left" onclick="selectSide('left')">
+            <div class="side-icon" id="icon-left">⬅️</div>
+            <img id="thumb-left" src="" alt="اليسار">
+            <div class="side-title">اليسار</div>
+            <div class="side-status" id="status-left">اختياري</div>
+        </div>
+    </div>
+
+    <div class="btn-row">
+        <button id="toggleIsolateBtn" class="isolate-toggle">عزل: مفعّل</button>
+
+        <button id="instantBtn" class="btn btn-instant" disabled>
+            ⚡ بناء المجسم 360°
+        </button>
+
+        <button id="cloudBtn" class="btn btn-primary" disabled>
+            ☁️ سحابي
+        </button>
+    </div>
+</div>
+
+<div class="modal-backdrop" id="tokenModal">
+    <div class="modal-card">
+        <h3>🔑 مفتاح Hugging Face السحابي</h3>
+        <p>الصق رمز حسابك المجاني (hf_...) لتشغيل خوادم التوليد السحابية:</p>
+        <input type="password" id="hfTokenInput" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx">
+        <div class="btn-row">
+            <button id="saveTokenBtn" class="btn btn-primary">حفظ المفتاح</button>
+            <button id="closeTokenBtn" class="btn btn-secondary">إغلاق</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const instantBtn = document.getElementById('instantBtn');
+    const cloudBtn = document.getElementById('cloudBtn');
+    const toggleIsolateBtn = document.getElementById('toggleIsolateBtn');
+
+    const loaderOverlay = document.getElementById('loaderOverlay');
+    const statusTitle = document.getElementById('statusTitle');
+    const statusSub = document.getElementById('statusSub');
+    const placeholderBox = document.getElementById('placeholderBox');
+    const modelViewer = document.getElementById('modelViewer');
+    const local3dContainer = document.getElementById('local3dContainer');
+    const depthControlBox = document.getElementById('depthControlBox');
+    const depthRange = document.getElementById('depthRange');
+    const depthVal = document.getElementById('depthVal');
+    const trimRange = document.getElementById('trimRange');
+    const trimVal = document.getElementById('trimVal');
+    const toastBanner = document.getElementById('toastBanner');
+
+    const openTokenBtn = document.getElementById('openTokenBtn');
+    const tokenModal = document.getElementById('tokenModal');
+    const hfTokenInput = document.getElementById('hfTokenInput');
+    const saveTokenBtn = document.getElementById('saveTokenBtn');
+    const closeTokenBtn = document.getElementById('closeTokenBtn');
+
+    const sideDataUrls = { front: null, back: null, right: null, left: null };
+    let autoIsolate = true;
+
+    let scene, camera, renderer, unifiedMesh;
+    let baseZValues = null, sideSigns = null;
+    let isDragging = false, prevX = 0, prevY = 0;
+    let rotX = 0, rotY = 0, autoSpin = true;
+
+    function showToast(msg) {
+        toastBanner.textContent = msg;
+        toastBanner.style.display = 'block';
+        setTimeout(() => { toastBanner.style.display = 'none'; }, 6000);
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+    function selectSide(side) {
+        if (window.AndroidBridge && window.AndroidBridge.openGalleryForSide) {
+            window.AndroidBridge.openGalleryForSide(side);
+        }
+    }
 
-        pickMediaLauncher = registerForActivityResult(
-            ActivityResultContracts.PickVisualMedia()
-        ) { uri: Uri? ->
-            if (uri != null) {
-                sideUris[pendingTargetSide] = uri
-                processSelectedImage(uri, pendingTargetSide)
-            }
+    toggleIsolateBtn.addEventListener('click', () => {
+        autoIsolate = !autoIsolate;
+        toggleIsolateBtn.textContent = autoIsolate ? "عزل: مفعّل" : "عزل: متوقف";
+        if (window.AndroidBridge && window.AndroidBridge.setAutoIsolate) {
+            window.AndroidBridge.setAutoIsolate(autoIsolate);
+        }
+    });
+
+    openTokenBtn.addEventListener('click', () => {
+        if (window.AndroidBridge && window.AndroidBridge.getHfToken) {
+            hfTokenInput.value = window.AndroidBridge.getHfToken();
+        }
+        tokenModal.style.display = 'flex';
+    });
+
+    closeTokenBtn.addEventListener('click', () => { tokenModal.style.display = 'none'; });
+
+    saveTokenBtn.addEventListener('click', () => {
+        if (window.AndroidBridge && window.AndroidBridge.saveHfToken) {
+            window.AndroidBridge.saveHfToken(hfTokenInput.value);
+            showToast("تم حفظ مفتاح Hugging Face بنجاح.");
+        }
+        tokenModal.style.display = 'none';
+    });
+
+    window.onSideImageSelected = function(side, dataUrl) {
+        sideDataUrls[side] = dataUrl;
+        const card = document.getElementById('card-' + side);
+        const icon = document.getElementById('icon-' + side);
+        const thumb = document.getElementById('thumb-' + side);
+        const status = document.getElementById('status-' + side);
+
+        if (card && thumb && icon && status) {
+            card.classList.add('loaded');
+            icon.style.display = 'none';
+            thumb.src = dataUrl;
+            thumb.style.display = 'block';
+            status.textContent = 'تم ✓';
         }
 
-        webView = WebView(this).apply {
-            setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                allowFileAccess = true
-                allowContentAccess = true
-                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                useWideViewPort = true
-                loadWithOverviewMode = true
-            }
-
-            addJavascriptInterface(WebAppInterface(), "AndroidBridge")
-            webViewClient = WebViewClient()
-            webChromeClient = WebChromeClient()
+        if (sideDataUrls.front) {
+            instantBtn.disabled = false;
+            cloudBtn.disabled = false;
+            autoSpin = true;
+            buildQuadView3DModel();
         }
+    };
 
-        setContentView(webView)
-        webView.loadUrl("file:///android_asset/index.html")
+    function loadImageAsync(src) {
+        return new Promise((resolve) => {
+            if (!src) return resolve(null);
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => resolve(null);
+            img.src = src;
+        });
+    }
 
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                if (webView.canGoBack()) {
-                    webView.goBack()
-                } else {
-                    finish()
+    function getSubjectBounds(img, minAlpha) {
+        const c = document.createElement('canvas');
+        c.width = img.width;
+        c.height = img.height;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const data = ctx.getImageData(0, 0, c.width, c.height).data;
+
+        let minX = c.width, minY = c.height, maxX = 0, maxY = 0;
+        let found = false;
+        for (let y = 0; y < c.height; y++) {
+            for (let x = 0; x < c.width; x++) {
+                const idx = (y * c.width + x) * 4;
+                const a = data[idx + 3];
+                const isWhite = data[idx] > 235 && data[idx + 1] > 235 && data[idx + 2] > 235;
+                if (a >= minAlpha && !isWhite) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                    found = true;
                 }
             }
-        })
+        }
+        if (!found) return { x: 0, y: 0, w: c.width, h: c.height };
+        return { x: minX, y: minY, w: Math.max(1, maxX - minX + 1), h: Math.max(1, maxY - minY + 1) };
     }
 
-    inner class WebAppInterface {
-        @JavascriptInterface
-        fun openGalleryForSide(side: String) {
-            pendingTargetSide = side
-            runOnUiThread {
-                pickMediaLauncher.launch(
-                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                )
-            }
+    // تقشير الهالة البيضاء (3px) واستخراج بيانات الألوان النقية وقناع الجسم
+    function extractCleanSideData(img, targetW, targetH, minAlpha, mirrorX) {
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+
+        if (!img) {
+            return { canvas, mask: new Uint8Array(targetW * targetH), colorData: new Uint8ClampedArray(targetW * targetH * 4), valid: false };
         }
 
-        @JavascriptInterface
-        fun setAutoIsolate(enabled: Boolean) {
-            autoIsolateEnabled = enabled
-            sideUris.forEach { (side, uri) ->
-                processSelectedImage(uri, side)
-            }
+        const bounds = getSubjectBounds(img, minAlpha);
+        ctx.save();
+        if (mirrorX) {
+            ctx.translate(targetW, 0);
+            ctx.scale(-1, 1);
+        }
+        ctx.drawImage(img, bounds.x, bounds.y, bounds.w, bounds.h, 0, 0, targetW, targetH);
+        ctx.restore();
+
+        const imgData = ctx.getImageData(0, 0, targetW, targetH);
+        const src = imgData.data;
+
+        let mask = new Uint8Array(targetW * targetH);
+        for (let i = 0; i < targetW * targetH; i++) {
+            const p = i * 4;
+            const a = src[p + 3];
+            const isBrightWhite = (src[p] > 230 && src[p + 1] > 230 && src[p + 2] > 230);
+            mask[i] = (a >= minAlpha && !isBrightWhite) ? 1 : 0;
         }
 
-        @JavascriptInterface
-        fun saveHfToken(token: String) {
-            getSharedPreferences("studio_prefs", Context.MODE_PRIVATE)
-                .edit()
-                .putString("hf_token", token.trim())
-                .apply()
-        }
-
-        @JavascriptInterface
-        fun getHfToken(): String {
-            return getSharedPreferences("studio_prefs", Context.MODE_PRIVATE)
-                .getString("hf_token", "") ?: ""
-        }
-
-        @JavascriptInterface
-        fun startCloud3D() {
-            val bytes = currentFrontBytes
-            if (bytes == null) {
-                sendCloudFallback("يرجى اختيار صورة الأمام أولاً.")
-                return
-            }
-            val token = getHfToken()
-            Thread {
-                runCloudConversion(bytes, token)
-            }.start()
-        }
-    }
-
-    private fun processSelectedImage(uri: Uri, side: String) {
-        Thread {
-            try {
-                val inputStream = contentResolver.openInputStream(uri)
-                val originalBitmap = BitmapFactory.decodeStream(inputStream)
-                inputStream?.close() ?: return@Thread
-
-                if (originalBitmap == null) return@Thread
-
-                val maxDim = 900
-                val scale = minOf(
-                    maxDim.toFloat() / originalBitmap.width,
-                    maxDim.toFloat() / originalBitmap.height,
-                    1.0f
-                )
-                val newWidth = (originalBitmap.width * scale).toInt()
-                val newHeight = (originalBitmap.height * scale).toInt()
-                val scaledBitmap = Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
-
-                val alreadyIsolated = isAlreadyCutoutOrPlainBg(scaledBitmap)
-
-                if (!autoIsolateEnabled || alreadyIsolated) {
-                    val cleanBitmap = removePureWhiteCornersIfNeeded(scaledBitmap)
-                    sendBitmapToWebView(cleanBitmap, side)
-                    return@Thread
-                }
-
-                val inputImage = InputImage.fromBitmap(scaledBitmap, 0)
-
-                segmenter.process(inputImage)
-                    .addOnSuccessListener { segmentationMask ->
-                        Thread {
-                            try {
-                                val maskBuffer = segmentationMask.buffer
-                                val maskWidth = segmentationMask.width
-                                val maskHeight = segmentationMask.height
-
-                                val confidences = FloatArray(maskWidth * maskHeight)
-                                maskBuffer.rewind()
-                                var foregroundCount = 0
-                                for (i in confidences.indices) {
-                                    val c = maskBuffer.float
-                                    confidences[i] = c
-                                    if (c > 0.7f) foregroundCount++
-                                }
-
-                                val ratio = foregroundCount.toFloat() / confidences.size
-                                if (ratio < 0.03f || ratio > 0.92f) {
-                                    sendBitmapToWebView(scaledBitmap, side)
-                                    return@Thread
-                                }
-
-                                val pixels = IntArray(maskWidth * maskHeight)
-                                scaledBitmap.getPixels(pixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
-
-                                for (i in pixels.indices) {
-                                    val c = confidences[i]
-                                    if (c < 0.72f) {
-                                        pixels[i] = Color.TRANSPARENT
-                                    } else if (c < 0.90f) {
-                                        val alpha = (((c - 0.72f) / 0.18f) * 255).toInt().coerceIn(0, 255)
-                                        val origColor = pixels[i]
-                                        pixels[i] = Color.argb(
-                                            alpha,
-                                            Color.red(origColor),
-                                            Color.green(origColor),
-                                            Color.blue(origColor)
-                                        )
-                                    }
-                                }
-
-                                val cutoutBitmap = Bitmap.createBitmap(maskWidth, maskHeight, Bitmap.Config.ARGB_8888)
-                                cutoutBitmap.setPixels(pixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
-                                sendBitmapToWebView(cutoutBitmap, side)
-
-                            } catch (e: Exception) {
-                                sendBitmapToWebView(scaledBitmap, side)
+        // تقشير 3 بكسلات لإزالة الهالة البيضاء حول الحدود تماماً
+        const dirs4 = [-1, 1, -targetW, targetW];
+        for (let e = 0; e < 3; e++) {
+            const eroded = new Uint8Array(mask);
+            for (let y = 1; y < targetH - 1; y++) {
+                for (let x = 1; x < targetW - 1; x++) {
+                    const idx = y * targetW + x;
+                    if (mask[idx] === 1) {
+                        for (let d = 0; d < 4; d++) {
+                            if (mask[idx + dirs4[d]] === 0) {
+                                eroded[idx] = 0;
+                                break;
                             }
-                        }.start()
-                    }
-                    .addOnFailureListener {
-                        sendBitmapToWebView(scaledBitmap, side)
-                    }
-            } catch (e: Exception) {
-                sendCloudFallback("تعذر قراءة الصورة: ${e.localizedMessage}")
-            }
-        }.start()
-    }
-
-    private fun isAlreadyCutoutOrPlainBg(bmp: Bitmap): Boolean {
-        val w = bmp.width
-        val h = bmp.height
-        val samplePoints = listOf(
-            bmp.getPixel(2, 2),
-            bmp.getPixel(w - 3, 2),
-            bmp.getPixel(2, h - 3),
-            bmp.getPixel(w - 3, h - 3),
-            bmp.getPixel(w / 2, 2)
-        )
-        val transparentCorners = samplePoints.count { Color.alpha(it) < 50 }
-        if (transparentCorners >= 3) return true
-
-        val pureWhiteCorners = samplePoints.count {
-            Color.red(it) > 245 && Color.green(it) > 245 && Color.blue(it) > 245
-        }
-        return pureWhiteCorners >= 4
-    }
-
-    private fun removePureWhiteCornersIfNeeded(bmp: Bitmap): Bitmap {
-        val w = bmp.width
-        val h = bmp.height
-        val pixels = IntArray(w * h)
-        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
-
-        var hasTransparency = false
-        for (i in pixels.indices step 20) {
-            if (Color.alpha(pixels[i]) < 50) {
-                hasTransparency = true
-                break
-            }
-        }
-        if (hasTransparency) return bmp
-
-        val topLeft = pixels[0]
-        if (Color.red(topLeft) > 245 && Color.green(topLeft) > 245 && Color.blue(topLeft) > 245) {
-            for (i in pixels.indices) {
-                val p = pixels[i]
-                if (Color.red(p) > 242 && Color.green(p) > 242 && Color.blue(p) > 242) {
-                    pixels[i] = Color.TRANSPARENT
-                }
-            }
-            val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-            out.setPixels(pixels, 0, w, 0, 0, w, h)
-            return out
-        }
-        return bmp
-    }
-
-    private fun sendBitmapToWebView(bitmap: Bitmap, side: String) {
-        val outputStream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
-        val byteArray = outputStream.toByteArray()
-        if (side == "front") {
-            currentFrontBytes = byteArray
-        }
-        val base64String = Base64.encodeToString(byteArray, Base64.NO_WRAP)
-        val dataUrl = "data:image/png;base64,$base64String"
-        runOnUiThread {
-            webView.evaluateJavascript("window.onSideImageSelected('$side', '$dataUrl');", null)
-        }
-    }
-
-    private fun runCloudConversion(imageBytes: ByteArray, hfToken: String) {
-        val spaces = listOf(
-            "https://stabilityai-triposr.hf.space",
-            "https://hysts-triposr.hf.space",
-            "https://zxhezexin-openlrm.hf.space",
-            "https://ashawkey-lgm.hf.space"
-        )
-
-        var lastError = "الخوادم السحابية المجانية مشغولة حالياً."
-
-        for (spaceUrl in spaces) {
-            try {
-                updateStatus("جاري الاتصال بالسحابة...", spaceUrl.removePrefix("https://"))
-
-                val uploadResult = smartUploadToGradio(spaceUrl, imageBytes, hfToken)
-                val apiPrefix = uploadResult.first
-                val uploadedPath = uploadResult.second
-
-                val fileObj = JSONObject().apply {
-                    put("path", uploadedPath)
-                    put("meta", JSONObject().put("_type", "gradio.FileData"))
-                }
-
-                updateStatus("جاري بناء المجسم السحابي 360°...", "قد يستغرق ذلك 20 إلى 40 ثانية")
-
-                val modelUrl = when {
-                    spaceUrl.contains("triposr") -> {
-                        val prepData = JSONArray().put(fileObj).put(false).put(0.85)
-                        val prepRes = callGradioApi(spaceUrl, apiPrefix, "preprocess", prepData, hfToken)
-                        val genData = JSONArray().put(prepRes.getJSONObject(0)).put(256)
-                        val genRes = callGradioApi(spaceUrl, apiPrefix, "generate", genData, hfToken)
-                        extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
-                    }
-                    spaceUrl.contains("openlrm") -> {
-                        val genData = JSONArray().put(fileObj).put(false)
-                        val genRes = callGradioApi(spaceUrl, apiPrefix, "run", genData, hfToken)
-                        extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
-                    }
-                    else -> {
-                        val genData = JSONArray().put(fileObj)
-                        val genRes = callGradioApi(spaceUrl, apiPrefix, "run", genData, hfToken)
-                        extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
+                        }
                     }
                 }
+            }
+            mask = eroded;
+        }
 
-                runOnUiThread {
-                    val safeUrl = JSONObject.quote(modelUrl)
-                    webView.evaluateJavascript("window.on3DModelReady($safeUrl);", null)
-                }
-                return
-
-            } catch (e: Exception) {
-                lastError = e.message ?: "خطأ في الاتصال"
+        let colorData = new Uint8ClampedArray(targetW * targetH * 4);
+        for (let i = 0; i < targetW * targetH; i++) {
+            const p = i * 4;
+            if (mask[i] === 1) {
+                colorData[p] = src[p];
+                colorData[p + 1] = src[p + 1];
+                colorData[p + 2] = src[p + 2];
+                colorData[p + 3] = 255;
+            } else {
+                colorData[p + 3] = 0;
             }
         }
 
-        val hint = if (hfToken.isEmpty()) " (أضف مفتاح HF Token من الأعلى)" else ""
-        sendCloudFallback("تعذر الاتصال بالسحابة: $lastError$hint")
-    }
-
-    private fun extractModelUrl(spaceUrl: String, apiPrefix: String, obj: JSONObject): String {
-        return if (obj.has("url") && !obj.isNull("url")) {
-            obj.getString("url")
-        } else {
-            "$spaceUrl$apiPrefix/file=${obj.getString("path")}"
-        }
-    }
-
-    private fun smartUploadToGradio(spaceUrl: String, fileBytes: ByteArray, hfToken: String): Pair<String, String> {
-        val prefixes = listOf("/gradio_api", "")
-        var lastCode = 404
-
-        for (prefix in prefixes) {
-            try {
-                val boundary = "Boundary-${UUID.randomUUID()}"
-                val url = URL("$spaceUrl$prefix/upload")
-                val conn = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    doOutput = true
-                    connectTimeout = 15000
-                    readTimeout = 15000
-                    setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-                    setRequestProperty("User-Agent", "Mozilla/5.0 (Android)")
-                    if (hfToken.isNotEmpty()) {
-                        setRequestProperty("Authorization", "Bearer $hfToken")
+        // تمديد الألوان الداخلية النقية للخارج
+        const dirs8 = [-1, 1, -targetW, targetW, -targetW - 1, -targetW + 1, targetW - 1, targetW + 1];
+        for (let dPass = 0; dPass < 22; dPass++) {
+            const next = new Uint8ClampedArray(colorData);
+            for (let y = 1; y < targetH - 1; y++) {
+                for (let x = 1; x < targetW - 1; x++) {
+                    const idx = y * targetW + x;
+                    const pIdx = idx * 4;
+                    if (colorData[pIdx + 3] === 0) {
+                        let r = 0, g = 0, b = 0, count = 0;
+                        for (let d = 0; d < 8; d++) {
+                            const nIdx = (idx + dirs8[d]) * 4;
+                            if (colorData[nIdx + 3] > 0) {
+                                r += colorData[nIdx];
+                                g += colorData[nIdx + 1];
+                                b += colorData[nIdx + 2];
+                                count++;
+                            }
+                        }
+                        if (count > 0) {
+                            next[pIdx] = Math.round(r / count);
+                            next[pIdx + 1] = Math.round(g / count);
+                            next[pIdx + 2] = Math.round(b / count);
+                            next[pIdx + 3] = 255;
+                        }
                     }
                 }
+            }
+            colorData = next;
+        }
 
-                DataOutputStream(conn.outputStream).use { out ->
-                    out.writeBytes("--$boundary\r\n")
-                    out.writeBytes("Content-Disposition: form-data; name=\"files\"; filename=\"subject.png\"\r\n")
-                    out.writeBytes("Content-Type: image/png\r\n\r\n")
-                    out.write(fileBytes)
-                    out.writeBytes("\r\n--$boundary--\r\n")
-                    out.flush()
-                }
-
-                lastCode = conn.responseCode
-                if (lastCode in 200..299) {
-                    val response = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
-                    val jsonArray = JSONArray(response)
-                    return Pair(prefix, jsonArray.getString(0))
-                }
-            } catch (_: Exception) {
+        for (let i = 0; i < targetW * targetH; i++) {
+            const p = i * 4;
+            if (colorData[p + 3] === 0) {
+                colorData[p] = 135;
+                colorData[p + 1] = 95;
+                colorData[p + 2] = 75;
+                colorData[p + 3] = 255;
             }
         }
-        throw Exception("رمز الخادم: $lastCode")
+
+        imgData.data.set(colorData);
+        ctx.putImageData(imgData, 0, 0);
+        return { canvas, mask, colorData, valid: true };
     }
 
-    private fun callGradioApi(spaceUrl: String, apiPrefix: String, endpoint: String, dataArray: JSONArray, hfToken: String): JSONArray {
-        val postUrl = URL("$spaceUrl$apiPrefix/call/$endpoint")
-        val postConn = (postUrl.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = 20000
-            readTimeout = 20000
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Android)")
-            if (hfToken.isNotEmpty()) {
-                setRequestProperty("Authorization", "Bearer $hfToken")
-            }
-        }
+    // حساب السُمك العرضي الحقيقي عند كل صف Y من صورتي اليمين واليسار (Visual Hull Profile)
+    function computeSideDepthProfile(rightSide, leftSide, targetW, targetH) {
+        const profile = new Float32Array(targetH).fill(1.0);
+        if (!rightSide.valid && !leftSide.valid) return profile;
 
-        val payload = JSONObject().put("data", dataArray).toString()
-        postConn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+        let maxWidth = 1;
+        const rawWidths = new Float32Array(targetH);
 
-        if (postConn.responseCode !in 200..299) {
-            throw Exception("فشل الطلب ($endpoint: ${postConn.responseCode})")
-        }
-
-        val postResp = BufferedReader(InputStreamReader(postConn.inputStream)).use { it.readText() }
-        val eventId = JSONObject(postResp).getString("event_id")
-
-        val streamUrl = URL("$spaceUrl$apiPrefix/call/$endpoint/$eventId")
-        val streamConn = (streamUrl.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 25000
-            readTimeout = 90000
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Android)")
-            if (hfToken.isNotEmpty()) {
-                setRequestProperty("Authorization", "Bearer $hfToken")
-            }
-        }
-
-        BufferedReader(InputStreamReader(streamConn.inputStream)).use { reader ->
-            var line: String?
-            var isComplete = false
-            var isError = false
-            while (reader.readLine().also { line = it } != null) {
-                val current = line ?: continue
-                if (current.startsWith("event: error")) {
-                    isError = true
-                } else if (current.startsWith("event: complete")) {
-                    isComplete = true
-                } else if (current.startsWith("data: ")) {
-                    val dataStr = current.removePrefix("data: ")
-                    if (isError) throw Exception("انشغال الخادم")
-                    if (isComplete) return JSONArray(dataStr)
+        for (let y = 0; y < targetH; y++) {
+            let minX = targetW, maxX = 0, found = false;
+            for (let x = 0; x < targetW; x++) {
+                const idx = y * targetW + x;
+                const inR = rightSide.valid && rightSide.mask[idx];
+                const inL = leftSide.valid && leftSide.mask[idx];
+                if (inR || inL) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    found = true;
                 }
             }
+            const w = found ? (maxX - minX + 1) : 0;
+            rawWidths[y] = w;
+            if (w > maxWidth) maxWidth = w;
         }
-        throw Exception("انتهت المهلة")
+
+        for (let y = 0; y < targetH; y++) {
+            // نسبة السُمك الحقيقي عند هذا الارتفاع (بين 0.35 للساقين و 1.15 للصدر والقفازين)
+            const ratio = rawWidths[y] / maxWidth;
+            profile[y] = 0.35 + ratio * 0.80;
+        }
+        return profile;
     }
 
-    private fun updateStatus(title: String, sub: String) {
-        runOnUiThread {
-            val t = JSONObject.quote(title)
-            val s = JSONObject.quote(sub)
-            webView.evaluateJavascript("window.updateConversionStatus($t, $s);", null)
+    async function buildQuadView3DModel() {
+        if (!sideDataUrls.front) return;
+
+        const [frontImg, backImg, rightImg, leftImg] = await Promise.all([
+            loadImageAsync(sideDataUrls.front),
+            loadImageAsync(sideDataUrls.back),
+            loadImageAsync(sideDataUrls.right),
+            loadImageAsync(sideDataUrls.left)
+        ]);
+        if (!frontImg) return;
+
+        placeholderBox.style.display = 'none';
+        modelViewer.style.display = 'none';
+        local3dContainer.style.display = 'block';
+        depthControlBox.style.display = 'flex';
+
+        local3dContainer.innerHTML = '';
+        const width = local3dContainer.clientWidth;
+        const height = local3dContainer.clientHeight;
+
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 100);
+        camera.position.z = 2.45;
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        local3dContainer.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 0.65);
+        keyLight.position.set(2, 3, 4);
+        scene.add(keyLight);
+        const backLight = new THREE.DirectionalLight(0xffffff, 0.65);
+        backLight.position.set(-2, 2, -4);
+        scene.add(backLight);
+
+        const trimValNum = parseInt(trimRange.value, 10);
+        const minAlpha = Math.round((trimValNum / 100) * 255);
+
+        const fBounds = getSubjectBounds(frontImg, minAlpha);
+        const targetH = 560;
+        const aspect = fBounds.w / fBounds.h;
+        const targetW = Math.max(190, Math.round(targetH * aspect));
+
+        // 1. استخراج بيانات الجهات الأربع النظيفة
+        const frontRes = extractCleanSideData(frontImg, targetW, targetH, minAlpha, false);
+        const backRes = backImg
+            ? extractCleanSideData(backImg, targetW, targetH, minAlpha, true)
+            : frontRes;
+        const rightRes = extractCleanSideData(rightImg, targetW, targetH, minAlpha, false);
+        const leftRes = extractCleanSideData(leftImg, targetW, targetH, minAlpha, false);
+
+        // 2. دمج الأمام والخلف في Atlas عالي الدقة
+        const atlasCanvas = document.createElement('canvas');
+        atlasCanvas.width = targetW * 2;
+        atlasCanvas.height = targetH;
+        const aCtx = atlasCanvas.getContext('2d');
+        aCtx.drawImage(frontRes.canvas, 0, 0);
+        aCtx.drawImage(backRes.canvas, targetW, 0);
+
+        const atlasTex = new THREE.CanvasTexture(atlasCanvas);
+        atlasTex.needsUpdate = true;
+
+        // 3. حساب ملف السُمك الجانبي من صورتي اليمين واليسار
+        const sideDepthProfile = computeSideDepthProfile(rightRes, leftRes, targetW, targetH);
+
+        // 4. بناء الشبكة ثلاثية الأبعاد الموحدة
+        const gw = 160;
+        const gh = Math.round((targetH / targetW) * 160);
+
+        const rawMask = new Float32Array(gw * gh);
+        for (let y = 0; y < gh; y++) {
+            for (let x = 0; x < gw; x++) {
+                const sx = Math.min(targetW - 1, Math.round((x / (gw - 1)) * (targetW - 1)));
+                const sy = Math.min(targetH - 1, Math.round((y / (gh - 1)) * (targetH - 1)));
+                const mIdx = sy * targetW + sx;
+                const inF = frontRes.mask[mIdx];
+                const inB = backImg ? backRes.mask[mIdx] : inF;
+                rawMask[y * gw + x] = (inF && inB) ? 1.0 : ((inF || inB) ? 0.65 : 0.0);
+            }
         }
+
+        const smoothMask = new Float32Array(gw * gh);
+        for (let y = 1; y < gh - 1; y++) {
+            for (let x = 1; x < gw - 1; x++) {
+                const i = y * gw + x;
+                const sum = rawMask[i] * 4 +
+                    (rawMask[i - 1] + rawMask[i + 1] + rawMask[i - gw] + rawMask[i + gw]) * 2 +
+                    (rawMask[i - gw - 1] + rawMask[i - gw + 1] + rawMask[i + gw - 1] + rawMask[i + gw + 1]);
+                smoothMask[i] = sum / 16.0;
+            }
+        }
+
+        const inside = new Uint8Array(gw * gh);
+        const dist = new Float32Array(gw * gh);
+        const INF = 9999;
+
+        for (let y = 2; y < gh - 2; y++) {
+            for (let x = 2; x < gw - 2; x++) {
+                const i = y * gw + x;
+                if (smoothMask[i] >= 0.48) {
+                    inside[i] = 1;
+                    dist[i] = INF;
+                }
+            }
+        }
+
+        for (let y = 1; y < gh - 1; y++) {
+            for (let x = 1; x < gw - 1; x++) {
+                const idx = y * gw + x;
+                if (dist[idx] > 0) {
+                    dist[idx] = Math.min(dist[idx], dist[idx - 1] + 1, dist[idx - gw] + 1, dist[idx - gw - 1] + 1.414, dist[idx - gw + 1] + 1.414);
+                }
+            }
+        }
+        for (let y = gh - 2; y >= 1; y--) {
+            for (let x = gw - 2; x >= 1; x--) {
+                const idx = y * gw + x;
+                if (dist[idx] > 0) {
+                    dist[idx] = Math.min(dist[idx], dist[idx + 1] + 1, dist[idx + gw] + 1, dist[idx + gw + 1] + 1.414, dist[idx + gw - 1] + 1.414);
+                }
+            }
+        }
+
+        const planeH = 1.9;
+        const planeW = planeH * (targetW / targetH);
+
+        const positions = [];
+        const uvs = [];
+        const colors = [];
+        const indices = [];
+        const zBaseList = [];
+        const signList = [];
+
+        const frontIdxMap = new Int32Array(gw * gh).fill(-1);
+        const backIdxMap = new Int32Array(gw * gh).fill(-1);
+        const radius = 16.0;
+
+        for (let y = 0; y < gh; y++) {
+            for (let x = 0; x < gw; x++) {
+                const i = y * gw + x;
+                if (!inside[i]) continue;
+
+                const isBoundary = !inside[i - 1] || !inside[i + 1] || !inside[i - gw] || !inside[i + gw];
+
+                const px = ((x / (gw - 1)) - 0.5) * planeW;
+                const py = (0.5 - (y / (gh - 1))) * planeH;
+                const uNorm = x / (gw - 1);
+                const vNorm = 1.0 - (y / (gh - 1));
+
+                const sx = Math.min(targetW - 1, Math.round(uNorm * (targetW - 1)));
+                const sy = Math.min(targetH - 1, Math.round((1.0 - vNorm) * (targetH - 1)));
+                const pIdx = (sy * targetW + sx) * 4;
+                const heightScale = sideDepthProfile[sy];
+
+                if (isBoundary) {
+                    // استخدام ألوان صورتي اليمين واليسار عند الحواف الجانبية (وإن لم تتوفرا يُدمج الأمام والخلف)
+                    let r, g, b;
+                    const sideSrc = (uNorm >= 0.5 && rightRes.valid) ? rightRes :
+                                    (uNorm < 0.5 && leftRes.valid) ? leftRes : null;
+
+                    if (sideSrc) {
+                        const centerIdx = (sy * targetW + Math.floor(targetW / 2)) * 4;
+                        r = sideSrc.colorData[centerIdx] / 255;
+                        g = sideSrc.colorData[centerIdx + 1] / 255;
+                        b = sideSrc.colorData[centerIdx + 2] / 255;
+                    } else {
+                        r = ((frontRes.colorData[pIdx] + backRes.colorData[pIdx]) * 0.5) / 255;
+                        g = ((frontRes.colorData[pIdx + 1] + backRes.colorData[pIdx + 1]) * 0.5) / 255;
+                        b = ((frontRes.colorData[pIdx + 2] + backRes.colorData[pIdx + 2]) * 0.5) / 255;
+                    }
+
+                    const vIdx = positions.length / 3;
+                    positions.push(px, py, 0);
+                    uvs.push(uNorm * 0.5, vNorm);
+                    colors.push(r, g, b);
+                    zBaseList.push(0);
+                    signList.push(0);
+                    frontIdxMap[i] = vIdx;
+                    backIdxMap[i] = vIdx;
+                } else {
+                    const t = Math.min(1, dist[i] / radius);
+                    const smoothDome = (t * t * (3 - 2 * t)) * heightScale;
+
+                    // تدرج ناعم near-edge نحو ألوان اليمين واليسار عند الاقتراب من الحافة
+                    const edgeFactor = Math.max(0, 1 - (dist[i] / 5.0));
+                    let cr = 1, cg = 1, cb = 1;
+                    if (edgeFactor > 0 && (rightRes.valid || leftRes.valid)) {
+                        const sideSrc = (uNorm >= 0.5 && rightRes.valid) ? rightRes :
+                                        (uNorm < 0.5 && leftRes.valid) ? leftRes : null;
+                        if (sideSrc) {
+                            const cIdx = (sy * targetW + Math.floor(targetW / 2)) * 4;
+                            cr = 1 - edgeFactor * (1 - sideSrc.colorData[cIdx] / 255);
+                            cg = 1 - edgeFactor * (1 - sideSrc.colorData[cIdx + 1] / 255);
+                            cb = 1 - edgeFactor * (1 - sideSrc.colorData[cIdx + 2] / 255);
+                        }
+                    }
+
+                    const fIdx = positions.length / 3;
+                    positions.push(px, py, smoothDome);
+                    uvs.push(uNorm * 0.5, vNorm);
+                    colors.push(cr, cg, cb);
+                    zBaseList.push(smoothDome);
+                    signList.push(1);
+                    frontIdxMap[i] = fIdx;
+
+                    const bIdx = positions.length / 3;
+                    positions.push(px, py, -smoothDome);
+                    uvs.push(0.5 + uNorm * 0.5, vNorm);
+                    colors.push(cr, cg, cb);
+                    zBaseList.push(smoothDome);
+                    signList.push(-1);
+                    backIdxMap[i] = bIdx;
+                }
+            }
+        }
+
+        for (let y = 0; y < gh - 1; y++) {
+            for (let x = 0; x < gw - 1; x++) {
+                const i00 = y * gw + x;
+                const i10 = i00 + 1;
+                const i01 = i00 + gw;
+                const i11 = i01 + 1;
+
+                if (inside[i00] && inside[i10] && inside[i01] && inside[i11]) {
+                    indices.push(frontIdxMap[i00], frontIdxMap[i01], frontIdxMap[i10]);
+                    indices.push(frontIdxMap[i10], frontIdxMap[i01], frontIdxMap[i11]);
+
+                    indices.push(backIdxMap[i00], backIdxMap[i10], backIdxMap[i01]);
+                    indices.push(backIdxMap[i10], backIdxMap[i11], backIdxMap[i01]);
+                }
+            }
+        }
+
+        baseZValues = new Float32Array(zBaseList);
+        sideSigns = new Int8Array(signList);
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        geometry.setIndex(indices);
+
+        smoothFullMesh(geometry, 4);
+
+        const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.38;
+        applyThicknessToGeometry(geometry, scaleVal);
+
+        const material = new THREE.MeshStandardMaterial({
+            map: atlasTex,
+            vertexColors: true,
+            roughness: 0.55,
+            metalness: 0.04
+        });
+
+        unifiedMesh = new THREE.Mesh(geometry, material);
+        scene.add(unifiedMesh);
+
+        rotX = 0;
+        rotY = 0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (unifiedMesh) {
+                if (!isDragging && autoSpin) {
+                    rotY += 0.013;
+                }
+                unifiedMesh.rotation.y += (rotY - unifiedMesh.rotation.y) * 0.15;
+                unifiedMesh.rotation.x += (rotX - unifiedMesh.rotation.x) * 0.15;
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        const dom = renderer.domElement;
+        dom.addEventListener('touchstart', (e) => {
+            isDragging = true;
+            autoSpin = false;
+            prevX = e.touches[0].clientX;
+            prevY = e.touches[0].clientY;
+        });
+        dom.addEventListener('touchmove', (e) => {
+            if (!isDragging || !unifiedMesh) return;
+            const dx = e.touches[0].clientX - prevX;
+            const dy = e.touches[0].clientY - prevY;
+            rotY += dx * 0.014;
+            rotX = Math.max(-0.65, Math.min(0.65, rotX + dy * 0.012));
+            prevX = e.touches[0].clientX;
+            prevY = e.touches[0].clientY;
+        });
+        dom.addEventListener('touchend', () => { isDragging = false; });
     }
 
-    private fun sendCloudFallback(reason: String) {
-        runOnUiThread {
-            val r = JSONObject.quote(reason)
-            webView.evaluateJavascript("window.activateInstantLocal3D($r);", null)
+    function smoothFullMesh(geo, iterations) {
+        const pos = geo.attributes.position;
+        const idx = geo.index.array;
+        const count = pos.count;
+        const neighbors = Array.from({ length: count }, () => new Set());
+
+        for (let i = 0; i < idx.length; i += 3) {
+            const a = idx[i], b = idx[i + 1], c = idx[i + 2];
+            neighbors[a].add(b); neighbors[a].add(c);
+            neighbors[b].add(a); neighbors[b].add(c);
+            neighbors[c].add(a); neighbors[c].add(b);
         }
+
+        for (let it = 0; it < iterations; it++) {
+            const newX = new Float32Array(count);
+            const newY = new Float32Array(count);
+            const newZ = new Float32Array(count);
+            for (let i = 0; i < count; i++) {
+                if (neighbors[i].size > 0) {
+                    let sx = 0, sy = 0, sz = 0, n = 0;
+                    neighbors[i].forEach(nb => {
+                        sx += pos.getX(nb);
+                        sy += pos.getY(nb);
+                        sz += baseZValues[nb];
+                        n++;
+                    });
+                    const weight = sideSigns[i] === 0 ? 0.65 : 0.35;
+                    newX[i] = pos.getX(i) * (1 - weight) + (sx / n) * weight;
+                    newY[i] = pos.getY(i) * (1 - weight) + (sy / n) * weight;
+                    newZ[i] = baseZValues[i] * 0.55 + (sz / n) * 0.45;
+                } else {
+                    newX[i] = pos.getX(i);
+                    newY[i] = pos.getY(i);
+                    newZ[i] = baseZValues[i];
+                }
+            }
+            for (let i = 0; i < count; i++) {
+                pos.setXY(i, newX[i], newY[i]);
+                baseZValues[i] = newZ[i];
+            }
+        }
+        pos.needsUpdate = true;
     }
 
-    override fun onDestroy() {
-        segmenter.close()
-        webView.destroy()
-        super.onDestroy()
+    function applyThicknessToGeometry(geo, scale) {
+        if (!geo || !baseZValues || !sideSigns) return;
+        const posAttr = geo.attributes.position;
+        for (let i = 0; i < posAttr.count; i++) {
+            posAttr.setZ(i, baseZValues[i] * sideSigns[i] * scale);
+        }
+        posAttr.needsUpdate = true;
+        geo.computeVertexNormals();
     }
-}
+
+    depthRange.addEventListener('input', (e) => {
+        const val = e.target.value;
+        depthVal.textContent = val + '%';
+        const s = (val / 100) * 0.38;
+        if (unifiedMesh) {
+            applyThicknessToGeometry(unifiedMesh.geometry, s);
+        }
+    });
+
+    trimRange.addEventListener('input', (e) => {
+        trimVal.textContent = e.target.value + '%';
+    });
+
+    trimRange.addEventListener('change', () => {
+        if (sideDataUrls.front) buildQuadView3DModel();
+    });
+
+    instantBtn.addEventListener('click', () => {
+        if (!sideDataUrls.front) return;
+        autoSpin = true;
+        buildQuadView3DModel();
+    });
+
+    cloudBtn.addEventListener('click', () => {
+        if (window.AndroidBridge && window.AndroidBridge.startCloud3D) {
+            loaderOverlay.style.display = 'flex';
+            instantBtn.disabled = true;
+            cloudBtn.disabled = true;
+            window.AndroidBridge.startCloud3D();
+        }
+    });
+
+    window.updateConversionStatus = function(title, sub) {
+        statusTitle.textContent = title;
+        statusSub.textContent = sub;
+    };
+
+    window.on3DModelReady = function(modelUrl) {
+        loaderOverlay.style.display = 'none';
+        instantBtn.disabled = false;
+        cloudBtn.disabled = false;
+        placeholderBox.style.display = 'none';
+        local3dContainer.style.display = 'none';
+        depthControlBox.style.display = 'none';
+        modelViewer.src = modelUrl;
+        modelViewer.style.display = 'block';
+    };
+
+    window.activateInstantLocal3D = function(reason) {
+        loaderOverlay.style.display = 'none';
+        instantBtn.disabled = false;
+        cloudBtn.disabled = false;
+        if (sideDataUrls.front) {
+            buildQuadView3DModel();
+            showToast(reason);
+        }
+    };
+</script>
+
+</body>
+</html>
