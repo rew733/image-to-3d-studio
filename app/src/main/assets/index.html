@@ -71,10 +71,10 @@
         .placeholder {
             text-align: center;
             padding: 24px;
-            max-width: 320px;
+            max-width: 330px;
         }
         .placeholder-icon { font-size: 3rem; margin-bottom: 12px; opacity: 0.85; }
-        .placeholder p { color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+        .placeholder p { color: var(--muted); font-size: 0.9rem; line-height: 1.55; }
         .depth-slider-box {
             position: absolute;
             bottom: 12px;
@@ -146,57 +146,69 @@
         .controls {
             background: var(--card);
             border-top: 1px solid var(--border);
-            padding: 14px 16px;
+            padding: 12px 14px;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 9px;
         }
-        .preview-bar {
-            display: none;
+        .dual-thumbs-bar {
+            display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
             background: #12151b;
             padding: 7px 10px;
             border-radius: 10px;
             border: 1px solid var(--border);
         }
-        .preview-bar img {
-            width: 44px;
-            height: 44px;
-            object-fit: contain;
-            background: repeating-conic-gradient(#1f2937 0% 25%, #111827 0% 50%) 50% / 10px 10px;
+        .thumb-slot {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: #1a1f29;
+            padding: 4px 8px;
             border-radius: 8px;
-            border: 1px solid #374151;
+            border: 1px solid #2d3442;
+            font-size: 0.74rem;
+            color: #d1d5db;
         }
-        .preview-info { flex: 1; font-size: 0.8rem; color: #e5e7eb; }
+        .thumb-slot img {
+            width: 34px;
+            height: 34px;
+            object-fit: contain;
+            background: repeating-conic-gradient(#1f2937 0% 25%, #111827 0% 50%) 50% / 8px 8px;
+            border-radius: 6px;
+            display: none;
+        }
         .isolate-toggle {
+            margin-right: auto;
             background: #1e293b;
             color: #38bdf8;
             border: 1px solid #0284c7;
-            padding: 5px 9px;
+            padding: 5px 8px;
             border-radius: 8px;
-            font-size: 0.72rem;
+            font-size: 0.7rem;
             font-weight: 600;
             cursor: pointer;
         }
-        .btn-row { display: flex; gap: 8px; }
+        .btn-row { display: flex; gap: 7px; }
         .btn {
             flex: 1;
-            padding: 12px 10px;
+            padding: 11px 8px;
             border: none;
-            border-radius: 12px;
-            font-size: 0.86rem;
+            border-radius: 11px;
+            font-size: 0.82rem;
             font-weight: 600;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
+            gap: 5px;
             transition: 0.2s;
         }
         .btn-primary { background: var(--accent); color: #fff; }
         .btn-instant { background: #10b981; color: #fff; }
         .btn-secondary { background: #262b36; color: #fff; border: 1px solid var(--border); }
+        .btn-back { background: #312e81; color: #e0e7ff; border: 1px solid #4338ca; }
         .btn:disabled { opacity: 0.45; pointer-events: none; }
 
         .modal-backdrop {
@@ -240,7 +252,7 @@
     <h1>استوديو التحويل إلى 3D</h1>
     <div class="header-actions">
         <button id="openTokenBtn" class="token-btn">🔑 HF Token</button>
-        <span class="badge">Solid 360° • v3.2</span>
+        <span class="badge">Dual-View • v4.0</span>
     </div>
 </header>
 
@@ -249,7 +261,7 @@
 
     <div class="placeholder" id="placeholderBox">
         <div class="placeholder-icon">🥊</div>
-        <p>اختر صورة الشخص؛ يبني المحرك <b>مجسماً واحداً متصلاً ومغلقاً 360°</b> يجمع بين الملامح الحقيقية وتوليد الظهر.</p>
+        <p>ارفع <b>صورة الأمام</b> ثم <b>صورة الخلف</b>؛ سيقوم المحرك بمحاذاة الصورتين تلقائياً وبناء مجسم بشري حقيقي <b>360°</b> بالعمق والتحريك!</p>
     </div>
 
     <model-viewer id="modelViewer"
@@ -265,7 +277,7 @@
     <div class="depth-slider-box" id="depthControlBox">
         <div class="slider-row">
             <div class="depth-header">
-                <span>سُمك وبروز المجسم (3D Volume)</span>
+                <span>سُمك وحجم المجسم (3D Volume)</span>
                 <span id="depthVal">55%</span>
             </div>
             <input type="range" id="depthRange" min="0" max="100" value="55">
@@ -287,23 +299,33 @@
 </div>
 
 <div class="controls">
-    <div class="preview-bar" id="previewBar">
-        <img id="thumbImg" src="" alt="صورة معزولة">
-        <div class="preview-info">جاهز — اسحب 360° لمعاينة الأمام والخلف</div>
-        <button id="toggleIsolateBtn" class="isolate-toggle">عزل تلقائي: مفعّل</button>
+    <div class="dual-thumbs-bar">
+        <div class="thumb-slot">
+            <img id="frontThumb" src="" alt="أمام">
+            <span id="frontLabel">الأمام: غير محدد</span>
+        </div>
+        <div class="thumb-slot">
+            <img id="backThumb" src="" alt="خلف">
+            <span id="backLabel">الخلف: اختياري</span>
+        </div>
+        <button id="toggleIsolateBtn" class="isolate-toggle">عزل: مفعّل</button>
     </div>
 
     <div class="btn-row">
-        <button id="pickBtn" class="btn btn-secondary">
-            📷 صورة
+        <button id="pickFrontBtn" class="btn btn-secondary">
+            📷 الأمام
+        </button>
+
+        <button id="pickBackBtn" class="btn btn-back">
+            🔄 الخلف
         </button>
 
         <button id="instantBtn" class="btn btn-instant" disabled>
-            ⚡ مجسم 360° فوري
+            ⚡ بناء 360°
         </button>
 
         <button id="cloudBtn" class="btn btn-primary" disabled>
-            ☁️ سحابي 360°
+            ☁️ سحابي
         </button>
     </div>
 </div>
@@ -321,12 +343,16 @@
 </div>
 
 <script>
-    const pickBtn = document.getElementById('pickBtn');
+    const pickFrontBtn = document.getElementById('pickFrontBtn');
+    const pickBackBtn = document.getElementById('pickBackBtn');
     const instantBtn = document.getElementById('instantBtn');
     const cloudBtn = document.getElementById('cloudBtn');
-    const previewBar = document.getElementById('previewBar');
-    const thumbImg = document.getElementById('thumbImg');
+    const frontThumb = document.getElementById('frontThumb');
+    const backThumb = document.getElementById('backThumb');
+    const frontLabel = document.getElementById('frontLabel');
+    const backLabel = document.getElementById('backLabel');
     const toggleIsolateBtn = document.getElementById('toggleIsolateBtn');
+
     const loaderOverlay = document.getElementById('loaderOverlay');
     const statusTitle = document.getElementById('statusTitle');
     const statusSub = document.getElementById('statusSub');
@@ -346,8 +372,10 @@
     const saveTokenBtn = document.getElementById('saveTokenBtn');
     const closeTokenBtn = document.getElementById('closeTokenBtn');
 
-    let currentDataUrl = null;
+    let frontDataUrl = null;
+    let backDataUrl = null;
     let autoIsolate = true;
+
     let scene, camera, renderer, unifiedMesh;
     let baseZValues = null, sideSigns = null;
     let isDragging = false, prevX = 0, prevY = 0;
@@ -361,7 +389,7 @@
 
     toggleIsolateBtn.addEventListener('click', () => {
         autoIsolate = !autoIsolate;
-        toggleIsolateBtn.textContent = autoIsolate ? "عزل تلقائي: مفعّل" : "عزل تلقائي: متوقف";
+        toggleIsolateBtn.textContent = autoIsolate ? "عزل: مفعّل" : "عزل: متوقف";
         if (window.AndroidBridge && window.AndroidBridge.setAutoIsolate) {
             window.AndroidBridge.setAutoIsolate(autoIsolate);
         }
@@ -384,24 +412,83 @@
         tokenModal.style.display = 'none';
     });
 
-    pickBtn.addEventListener('click', () => {
-        if (window.AndroidBridge && window.AndroidBridge.openGallery) {
-            window.AndroidBridge.openGallery();
+    pickFrontBtn.addEventListener('click', () => {
+        if (window.AndroidBridge && window.AndroidBridge.openGalleryForSide) {
+            window.AndroidBridge.openGalleryForSide('front');
         }
     });
 
-    window.onImageSelectedFromAndroid = function(dataUrl) {
-        currentDataUrl = dataUrl;
-        thumbImg.src = dataUrl;
-        previewBar.style.display = 'flex';
-        instantBtn.disabled = false;
-        cloudBtn.disabled = false;
-        autoSpin = true;
-        buildWatertight360Body(dataUrl);
+    pickBackBtn.addEventListener('click', () => {
+        if (window.AndroidBridge && window.AndroidBridge.openGalleryForSide) {
+            window.AndroidBridge.openGalleryForSide('back');
+        }
+    });
+
+    window.onSideImageSelected = function(side, dataUrl) {
+        if (side === 'front') {
+            frontDataUrl = dataUrl;
+            frontThumb.src = dataUrl;
+            frontThumb.style.display = 'block';
+            frontLabel.textContent = 'الأمام ✓';
+            instantBtn.disabled = false;
+            cloudBtn.disabled = false;
+        } else {
+            backDataUrl = dataUrl;
+            backThumb.src = dataUrl;
+            backThumb.style.display = 'block';
+            backLabel.textContent = 'الخلف ✓';
+        }
+
+        if (frontDataUrl) {
+            autoSpin = true;
+            buildDualView3DModel();
+        }
     };
 
-    // بناء مجسم هندسي واحد مغلق ومشترك الرؤوس (Watertight BufferGeometry) للأمام والخلف والجانبين
-    function buildWatertight360Body(dataUrl) {
+    function loadImageAsync(src) {
+        return new Promise((resolve) => {
+            if (!src) return resolve(null);
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => resolve(null);
+            img.src = src;
+        });
+    }
+
+    // استخراج حدود الجسم الفعلية (Bounding Box) لتوسيط ومطابقة الأمام مع الخلف بدقة
+    function getSubjectBounds(img, minAlpha) {
+        const c = document.createElement('canvas');
+        c.width = img.width;
+        c.height = img.height;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const data = ctx.getImageData(0, 0, c.width, c.height).data;
+
+        let minX = c.width, minY = c.height, maxX = 0, maxY = 0;
+        let found = false;
+        for (let y = 0; y < c.height; y++) {
+            for (let x = 0; x < c.width; x++) {
+                const a = data[(y * c.width + x) * 4 + 3];
+                if (a >= minAlpha) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                    found = true;
+                }
+            }
+        }
+        if (!found) return { x: 0, y: 0, w: c.width, h: c.height };
+        return { x: minX, y: minY, w: Math.max(1, maxX - minX + 1), h: Math.max(1, maxY - minY + 1) };
+    }
+
+    async function buildDualView3DModel() {
+        if (!frontDataUrl) return;
+
+        const frontImg = await loadImageAsync(frontDataUrl);
+        if (!frontImg) return;
+        const backImg = await loadImageAsync(backDataUrl);
+
         placeholderBox.style.display = 'none';
         modelViewer.style.display = 'none';
         local3dContainer.style.display = 'block';
@@ -420,223 +507,223 @@
         renderer.setPixelRatio(window.devicePixelRatio);
         local3dContainer.appendChild(renderer.domElement);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.78));
-        const keyLight = new THREE.DirectionalLight(0xffffff, 0.75);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.82));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 0.72);
         keyLight.position.set(2, 3, 4);
         scene.add(keyLight);
-        const backLight = new THREE.DirectionalLight(0x93c5fd, 0.65);
+        const backLight = new THREE.DirectionalLight(0xffffff, 0.72);
         backLight.position.set(-2, 2, -4);
         scene.add(backLight);
 
-        const img = new Image();
-        img.onload = function() {
-            const aspect = img.width / img.height;
-            const planeW = aspect >= 1 ? 1.85 : 1.85 * aspect;
-            const planeH = aspect >= 1 ? 1.85 / aspect : 1.85;
+        const trimValNum = parseInt(trimRange.value, 10);
+        const minAlpha = Math.round((trimValNum / 100) * 255);
 
-            const trimValNum = parseInt(trimRange.value, 10);
-            const minAlpha = Math.round((trimValNum / 100) * 255);
+        // محاذاة الصورتين في إطار موحد متمركز
+        const fBounds = getSubjectBounds(frontImg, minAlpha);
+        const targetH = 720;
+        const aspect = fBounds.w / fBounds.h;
+        const targetW = Math.max(240, Math.round(targetH * aspect));
 
-            // 1. تجهيز نسيج مزدوج (النصف الأيسر للوجه الأمامي الحاد، والنصف الأيمن للظهر بتفاصيل الملابس والشعر بدون ملامح وجه)
-            const atlasCanvas = document.createElement('canvas');
-            atlasCanvas.width = img.width * 2;
-            atlasCanvas.height = img.height;
-            const aCtx = atlasCanvas.getContext('2d');
+        const atlasCanvas = document.createElement('canvas');
+        atlasCanvas.width = targetW * 2;
+        atlasCanvas.height = targetH;
+        const aCtx = atlasCanvas.getContext('2d');
 
-            // رسم الوجه الأمامي في النصف الأول
-            aCtx.drawImage(img, 0, 0);
-            const frontImgData = aCtx.getImageData(0, 0, img.width, img.height);
-            const fp = frontImgData.data;
-            for (let i = 0; i < fp.length; i += 4) {
-                if (fp[i + 3] < minAlpha) fp[i + 3] = 0;
+        // 1. رسم صورة الأمام في النصف الأيسر (0 -> targetW)
+        aCtx.drawImage(frontImg, fBounds.x, fBounds.y, fBounds.w, fBounds.h, 0, 0, targetW, targetH);
+
+        // 2. رسم صورة الخلف الحقيقية مع عكسها أفقياً في النصف الأيمن (targetW -> targetW*2) لتطابق الأطراف 360°
+        if (backImg) {
+            const bBounds = getSubjectBounds(backImg, minAlpha);
+            aCtx.save();
+            aCtx.translate(targetW * 2, 0);
+            aCtx.scale(-1, 1);
+            aCtx.drawImage(backImg, bBounds.x, bBounds.y, bBounds.w, bBounds.h, 0, 0, targetW, targetH);
+            aCtx.restore();
+        } else {
+            // في حال عدم رفع صورة الخلف بعد، نضع نسيجاً مظللاً خفيفاً حتى يرفع المستخدم صورة الخلف
+            aCtx.save();
+            aCtx.filter = 'blur(8px) brightness(0.65)';
+            aCtx.drawImage(atlasCanvas, 0, 0, targetW, targetH, targetW, 0, targetW, targetH);
+            aCtx.restore();
+        }
+
+        // تنظيف الألفا وتنعيم الحواف في كلا النصفين
+        const fullData = aCtx.getImageData(0, 0, targetW * 2, targetH);
+        const fd = fullData.data;
+        for (let i = 0; i < fd.length; i += 4) {
+            if (fd[i + 3] < minAlpha) fd[i + 3] = 0;
+        }
+        aCtx.putImageData(fullData, 0, 0);
+
+        const atlasTex = new THREE.CanvasTexture(atlasCanvas);
+        atlasTex.needsUpdate = true;
+
+        // 3. بناء شبكة الارتفاع والعمق الموحدة (Union of Front & Back Silhouettes)
+        const gw = 170;
+        const gh = Math.round((targetH / targetW) * 170);
+
+        const maskCanvas = document.createElement('canvas');
+        maskCanvas.width = gw * 2;
+        maskCanvas.height = gh;
+        const mCtx = maskCanvas.getContext('2d');
+        mCtx.drawImage(atlasCanvas, 0, 0, gw * 2, gh);
+        const mData = mCtx.getImageData(0, 0, gw * 2, gh).data;
+
+        const inside = new Uint8Array(gw * gh);
+        const dist = new Float32Array(gw * gh);
+        const lumFront = new Float32Array(gw * gh);
+        const lumBack = new Float32Array(gw * gh);
+        const INF = 9999;
+
+        for (let y = 0; y < gh; y++) {
+            for (let x = 0; x < gw; x++) {
+                const i = y * gw + x;
+                const fIdx = (y * (gw * 2) + x) * 4;
+                const bIdx = (y * (gw * 2) + (gw + x)) * 4;
+
+                const aFront = mData[fIdx + 3];
+                const aBack = backImg ? mData[bIdx + 3] : 0;
+                const isBody = (aFront >= 120 || aBack >= 120);
+
+                if (x > 1 && x < gw - 2 && y > 1 && y < gh - 2 && isBody) {
+                    inside[i] = 1;
+                    dist[i] = INF;
+                }
+                lumFront[i] = (0.299 * mData[fIdx] + 0.587 * mData[fIdx + 1] + 0.114 * mData[fIdx + 2]) / 255;
+                lumBack[i] = (0.299 * mData[bIdx] + 0.587 * mData[bIdx + 1] + 0.114 * mData[bIdx + 2]) / 255;
             }
-            aCtx.putImageData(frontImgData, 0, 0);
+        }
 
-            // بناء نسيج الظهر في النصف الثاني: يبقي على الملابس والشورت والشعر بحده، وينعّم منطقة الوجه/الصدر فقط لتبدو كظهر بشري
-            const backTemp = document.createElement('canvas');
-            backTemp.width = img.width;
-            backTemp.height = img.height;
-            const btCtx = backTemp.getContext('2d');
-            btCtx.putImageData(frontImgData, 0, 0);
-
-            // تنعيم خفيف للظهر مع الحفاظ على التباين اللوني للملابس والشعر
-            const backSmooth = document.createElement('canvas');
-            backSmooth.width = img.width;
-            backSmooth.height = img.height;
-            const bsCtx = backSmooth.getContext('2d');
-            bsCtx.filter = 'blur(5px) brightness(0.92)';
-            bsCtx.drawImage(backTemp, 0, 0);
-            bsCtx.filter = 'none';
-
-            const bsData = bsCtx.getImageData(0, 0, img.width, img.height);
-            const bp = bsData.data;
-            for (let i = 0; i < bp.length; i += 4) {
-                bp[i + 3] = fp[i + 3];
-            }
-            aCtx.putImageData(bsData, img.width, 0);
-
-            const atlasTex = new THREE.CanvasTexture(atlasCanvas);
-            atlasTex.needsUpdate = true;
-
-            // 2. شبكة حساب المسافة لبناء الحجم العضوي المتصل
-            const gw = 160;
-            const gh = Math.round((img.height / img.width) * 160);
-            const maskCanvas = document.createElement('canvas');
-            maskCanvas.width = gw;
-            maskCanvas.height = gh;
-            const mCtx = maskCanvas.getContext('2d');
-            mCtx.drawImage(backTemp, 0, 0, gw, gh);
-            const mData = mCtx.getImageData(0, 0, gw, gh).data;
-
-            const inside = new Uint8Array(gw * gh);
-            const dist = new Float32Array(gw * gh);
-            const lum = new Float32Array(gw * gh);
-            const INF = 9999;
-
-            for (let y = 0; y < gh; y++) {
-                for (let x = 0; x < gw; x++) {
-                    const i = y * gw + x;
-                    const a = mData[i * 4 + 3];
-                    if (x > 1 && x < gw - 2 && y > 1 && y < gh - 2 && a >= 130) {
-                        inside[i] = 1;
-                        dist[i] = INF;
-                    }
-                    lum[i] = (0.299 * mData[i * 4] + 0.587 * mData[i * 4 + 1] + 0.114 * mData[i * 4 + 2]) / 255;
+        // تنعيم الحدود الموحدة لإزالة التسنن عند الجوانب
+        for (let y = 1; y < gh - 1; y++) {
+            for (let x = 1; x < gw - 1; x++) {
+                const idx = y * gw + x;
+                if (dist[idx] > 0) {
+                    dist[idx] = Math.min(dist[idx], dist[idx - 1] + 1, dist[idx - gw] + 1, dist[idx - gw - 1] + 1.414, dist[idx - gw + 1] + 1.414);
                 }
             }
-
-            for (let y = 1; y < gh - 1; y++) {
-                for (let x = 1; x < gw - 1; x++) {
-                    const idx = y * gw + x;
-                    if (dist[idx] > 0) {
-                        dist[idx] = Math.min(dist[idx], dist[idx - 1] + 1, dist[idx - gw] + 1, dist[idx - gw - 1] + 1.414, dist[idx - gw + 1] + 1.414);
-                    }
+        }
+        for (let y = gh - 2; y >= 1; y--) {
+            for (let x = gw - 2; x >= 1; x--) {
+                const idx = y * gw + x;
+                if (dist[idx] > 0) {
+                    dist[idx] = Math.min(dist[idx], dist[idx + 1] + 1, dist[idx + gw] + 1, dist[idx + gw + 1] + 1.414, dist[idx + gw - 1] + 1.414);
                 }
             }
-            for (let y = gh - 2; y >= 1; y--) {
-                for (let x = gw - 2; x >= 1; x--) {
-                    const idx = y * gw + x;
-                    if (dist[idx] > 0) {
-                        dist[idx] = Math.min(dist[idx], dist[idx + 1] + 1, dist[idx + gw] + 1, dist[idx + gw + 1] + 1.414, dist[idx + gw - 1] + 1.414);
-                    }
+        }
+
+        const planeH = 1.9;
+        const planeW = planeH * (targetW / targetH);
+
+        const positions = [];
+        const uvs = [];
+        const indices = [];
+        const zBaseList = [];
+        const signList = [];
+
+        const frontIdxMap = new Int32Array(gw * gh).fill(-1);
+        const backIdxMap = new Int32Array(gw * gh).fill(-1);
+        const radius = 13.0;
+
+        for (let y = 0; y < gh; y++) {
+            for (let x = 0; x < gw; x++) {
+                const i = y * gw + x;
+                if (!inside[i]) continue;
+
+                const isBoundary = !inside[i - 1] || !inside[i + 1] || !inside[i - gw] || !inside[i + gw];
+
+                const px = ((x / (gw - 1)) - 0.5) * planeW;
+                const py = (0.5 - (y / (gh - 1))) * planeH;
+                const uNorm = x / (gw - 1);
+                const vNorm = 1.0 - (y / (gh - 1));
+
+                if (isBoundary) {
+                    const vIdx = positions.length / 3;
+                    positions.push(px, py, 0);
+                    uvs.push(uNorm * 0.5, vNorm);
+                    zBaseList.push(0);
+                    signList.push(0);
+                    frontIdxMap[i] = vIdx;
+                    backIdxMap[i] = vIdx;
+                } else {
+                    const norm = Math.min(1, dist[i] / radius);
+                    const dome = Math.sin(norm * (Math.PI / 2));
+                    const depthF = dome * 0.82 + (lumFront[i] * 0.18 * dome);
+                    const depthB = dome * 0.82 + (lumBack[i] * 0.18 * dome);
+
+                    const fIdx = positions.length / 3;
+                    positions.push(px, py, depthF);
+                    uvs.push(uNorm * 0.5, vNorm);
+                    zBaseList.push(depthF);
+                    signList.push(1);
+                    frontIdxMap[i] = fIdx;
+
+                    const bIdx = positions.length / 3;
+                    positions.push(px, py, -depthB);
+                    uvs.push(0.5 + uNorm * 0.5, vNorm);
+                    zBaseList.push(depthB);
+                    signList.push(-1);
+                    backIdxMap[i] = bIdx;
                 }
             }
+        }
 
-            // 3. بناء هندسة واحدة مغلقة (Watertight Geometry) تلحم كل حافة خارجية بين الأمام والخلف مباشرة
-            const positions = [];
-            const uvs = [];
-            const indices = [];
-            const zBaseList = [];
-            const signList = [];
+        for (let y = 0; y < gh - 1; y++) {
+            for (let x = 0; x < gw - 1; x++) {
+                const i00 = y * gw + x;
+                const i10 = i00 + 1;
+                const i01 = i00 + gw;
+                const i11 = i01 + 1;
 
-            const frontIdxMap = new Int32Array(gw * gh).fill(-1);
-            const backIdxMap = new Int32Array(gw * gh).fill(-1);
+                if (inside[i00] && inside[i10] && inside[i01] && inside[i11]) {
+                    indices.push(frontIdxMap[i00], frontIdxMap[i01], frontIdxMap[i10]);
+                    indices.push(frontIdxMap[i10], frontIdxMap[i01], frontIdxMap[i11]);
 
-            const radius = 12.0;
-
-            for (let y = 0; y < gh; y++) {
-                for (let x = 0; x < gw; x++) {
-                    const i = y * gw + x;
-                    if (!inside[i]) continue;
-
-                    // فحص هل هذه النقطة تقع على الحافة الخارجية للجسم
-                    const isBoundary = !inside[i - 1] || !inside[i + 1] || !inside[i - gw] || !inside[i + gw];
-
-                    const px = ((x / (gw - 1)) - 0.5) * planeW;
-                    const py = (0.5 - (y / (gh - 1))) * planeH;
-                    const uNorm = x / (gw - 1);
-                    const vNorm = 1.0 - (y / (gh - 1));
-
-                    if (isBoundary) {
-                        // نقطة مشتركة واحدة على الحافة عند Z=0 تلحم الأمام بالخلف بلا أي خط فصل
-                        const vIdx = positions.length / 3;
-                        positions.push(px, py, 0);
-                        uvs.push(uNorm * 0.5, vNorm);
-                        zBaseList.push(0);
-                        signList.push(0);
-                        frontIdxMap[i] = vIdx;
-                        backIdxMap[i] = vIdx;
-                    } else {
-                        const norm = Math.min(1, dist[i] / radius);
-                        const dome = Math.sin(norm * (Math.PI / 2));
-                        const baseDepth = dome * 0.82 + (lum[i] * 0.18 * dome);
-
-                        // رأس الوجه الأمامي
-                        const fIdx = positions.length / 3;
-                        positions.push(px, py, baseDepth);
-                        uvs.push(uNorm * 0.5, vNorm);
-                        zBaseList.push(baseDepth);
-                        signList.push(1);
-                        frontIdxMap[i] = fIdx;
-
-                        // رأس الوجه الخلفي (يشير للنصف الثاني من النسيج)
-                        const bIdx = positions.length / 3;
-                        positions.push(px, py, -baseDepth);
-                        uvs.push(0.5 + uNorm * 0.5, vNorm);
-                        zBaseList.push(baseDepth);
-                        signList.push(-1);
-                        backIdxMap[i] = bIdx;
-                    }
+                    indices.push(backIdxMap[i00], backIdxMap[i10], backIdxMap[i01]);
+                    indices.push(backIdxMap[i10], backIdxMap[i11], backIdxMap[i01]);
                 }
             }
+        }
 
-            // بناء مثلثات الوجه الأمامي والوجه الخلفي الملتحمة عند الحواف
-            for (let y = 0; y < gh - 1; y++) {
-                for (let x = 0; x < gw - 1; x++) {
-                    const i00 = y * gw + x;
-                    const i10 = i00 + 1;
-                    const i01 = i00 + gw;
-                    const i11 = i01 + 1;
+        baseZValues = new Float32Array(zBaseList);
+        sideSigns = new Int8Array(signList);
 
-                    if (inside[i00] && inside[i10] && inside[i01] && inside[i11]) {
-                        // مثلثا الأمام
-                        indices.push(frontIdxMap[i00], frontIdxMap[i01], frontIdxMap[i10]);
-                        indices.push(frontIdxMap[i10], frontIdxMap[i01], frontIdxMap[i11]);
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        geometry.setIndex(indices);
 
-                        // مثلثا الخلف (بترتيب عكسي للأسطح الخارجية)
-                        indices.push(backIdxMap[i00], backIdxMap[i10], backIdxMap[i01]);
-                        indices.push(backIdxMap[i10], backIdxMap[i11], backIdxMap[i01]);
-                    }
+        // تنعيم مواضع رؤوس الحواف الخارجية لإزالة التسنن (Laplacian Boundary Smoothing)
+        smoothBoundaryVertices(geometry, 2);
+
+        const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.36;
+        applyThicknessToGeometry(geometry, scaleVal);
+
+        const material = new THREE.MeshStandardMaterial({
+            map: atlasTex,
+            roughness: 0.5,
+            metalness: 0.05
+        });
+
+        unifiedMesh = new THREE.Mesh(geometry, material);
+        scene.add(unifiedMesh);
+
+        rotX = 0;
+        rotY = 0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (unifiedMesh) {
+                if (!isDragging && autoSpin) {
+                    rotY += 0.013;
                 }
+                unifiedMesh.rotation.y += (rotY - unifiedMesh.rotation.y) * 0.15;
+                unifiedMesh.rotation.x += (rotX - unifiedMesh.rotation.x) * 0.15;
             }
-
-            baseZValues = new Float32Array(zBaseList);
-            sideSigns = new Int8Array(signList);
-
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-            geometry.setIndex(indices);
-
-            const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.36;
-            applyThicknessToGeometry(geometry, scaleVal);
-
-            const material = new THREE.MeshStandardMaterial({
-                map: atlasTex,
-                roughness: 0.52,
-                metalness: 0.06
-            });
-
-            unifiedMesh = new THREE.Mesh(geometry, material);
-            scene.add(unifiedMesh);
-
-            rotX = 0;
-            rotY = 0;
-
-            function animate() {
-                requestAnimationFrame(animate);
-                if (unifiedMesh) {
-                    if (!isDragging && autoSpin) {
-                        rotY += 0.013;
-                    }
-                    unifiedMesh.rotation.y += (rotY - unifiedMesh.rotation.y) * 0.15;
-                    unifiedMesh.rotation.x += (rotX - unifiedMesh.rotation.x) * 0.15;
-                }
-                renderer.render(scene, camera);
-            }
-            animate();
-        };
-        img.src = dataUrl;
+            renderer.render(scene, camera);
+        }
+        animate();
 
         const dom = renderer.domElement;
         dom.addEventListener('touchstart', (e) => {
@@ -655,6 +742,46 @@
             prevY = e.touches[0].clientY;
         });
         dom.addEventListener('touchend', () => { isDragging = false; });
+    }
+
+    function smoothBoundaryVertices(geo, iterations) {
+        const pos = geo.attributes.position;
+        const idx = geo.index.array;
+        const count = pos.count;
+        const neighbors = Array.from({ length: count }, () => new Set());
+
+        for (let i = 0; i < idx.length; i += 3) {
+            const a = idx[i], b = idx[i + 1], c = idx[i + 2];
+            neighbors[a].add(b); neighbors[a].add(c);
+            neighbors[b].add(a); neighbors[b].add(c);
+            neighbors[c].add(a); neighbors[c].add(b);
+        }
+
+        for (let it = 0; it < iterations; it++) {
+            const newX = new Float32Array(count);
+            const newY = new Float32Array(count);
+            for (let i = 0; i < count; i++) {
+                if (sideSigns[i] === 0 && neighbors[i].size > 0) {
+                    let sx = 0, sy = 0, n = 0;
+                    neighbors[i].forEach(nb => {
+                        if (sideSigns[nb] === 0) {
+                            sx += pos.getX(nb);
+                            sy += pos.getY(nb);
+                            n++;
+                        }
+                    });
+                    newX[i] = n > 0 ? (pos.getX(i) * 0.4 + (sx / n) * 0.6) : pos.getX(i);
+                    newY[i] = n > 0 ? (pos.getY(i) * 0.4 + (sy / n) * 0.6) : pos.getY(i);
+                } else {
+                    newX[i] = pos.getX(i);
+                    newY[i] = pos.getY(i);
+                }
+            }
+            for (let i = 0; i < count; i++) {
+                pos.setXY(i, newX[i], newY[i]);
+            }
+        }
+        pos.needsUpdate = true;
     }
 
     function applyThicknessToGeometry(geo, scale) {
@@ -681,13 +808,13 @@
     });
 
     trimRange.addEventListener('change', () => {
-        if (currentDataUrl) buildWatertight360Body(currentDataUrl);
+        if (frontDataUrl) buildDualView3DModel();
     });
 
     instantBtn.addEventListener('click', () => {
-        if (!currentDataUrl) return;
+        if (!frontDataUrl) return;
         autoSpin = true;
-        buildWatertight360Body(currentDataUrl);
+        buildDualView3DModel();
     });
 
     cloudBtn.addEventListener('click', () => {
@@ -719,8 +846,8 @@
         loaderOverlay.style.display = 'none';
         instantBtn.disabled = false;
         cloudBtn.disabled = false;
-        if (currentDataUrl) {
-            buildWatertight360Body(currentDataUrl);
+        if (frontDataUrl) {
+            buildDualView3DModel();
             showToast(reason);
         }
     };
