@@ -240,7 +240,7 @@
     <h1>استوديو التحويل إلى 3D</h1>
     <div class="header-actions">
         <button id="openTokenBtn" class="token-btn">🔑 HF Token</button>
-        <span class="badge">Volumetric 3D • v1.9</span>
+        <span class="badge">Sculpt 3D • v2.0</span>
     </div>
 </header>
 
@@ -249,7 +249,7 @@
 
     <div class="placeholder" id="placeholderBox">
         <div class="placeholder-icon">🧍‍♂️</div>
-        <p>اختر صورة عادية أو مفرّغة؛ سيقوم المحرك <b>بنفخ الحجم العضوي وبناء سُمك ثلاثي الأبعاد</b> للجسم مع تدوير 360°.</p>
+        <p>اختر صورة عادية أو مفرّغة؛ سيقوم المحرك ببناء <b>مجسم نحتي واحد متصل ومغلق الحواف</b> بدون أي تكرار.</p>
     </div>
 
     <model-viewer id="modelViewer"
@@ -265,10 +265,10 @@
     <div class="depth-slider-box" id="depthControlBox">
         <div class="slider-row">
             <div class="depth-header">
-                <span>حجم وبروز الجسم (3D Volume)</span>
-                <span id="depthVal">55%</span>
+                <span>انتفاخ وبروز المجسم (Sculpt Depth)</span>
+                <span id="depthVal">45%</span>
             </div>
-            <input type="range" id="depthRange" min="0" max="100" value="55">
+            <input type="range" id="depthRange" min="0" max="100" value="45">
         </div>
         <div class="slider-row">
             <div class="depth-header">
@@ -349,7 +349,7 @@
     let currentDataUrl = null;
     let autoIsolate = true;
     let scene, camera, renderer, bodyGroup;
-    let frontMat, backMat, rimMeshes = [];
+    let frontMat, backMat;
     let isDragging = false, prevX = 0, prevY = 0;
 
     function showToast(msg) {
@@ -395,15 +395,14 @@
         previewBar.style.display = 'flex';
         instantBtn.disabled = false;
         cloudBtn.disabled = false;
-        buildVolumetric3DBody(dataUrl);
+        buildSculpted3DBody(dataUrl);
     };
 
-    // حساب خريطة الحجم العضوي (Distance Field Inflation + Surface Detail)
-    function createVolumetricTextures(img, trimThreshold) {
+    // حساب خريطة نحت عضوية تلحم الحواف عند الصفر وتنفخ المركز بنعومة
+    function createSculptedTextures(img, trimThreshold) {
         const w = 180;
         const h = Math.round((img.height / img.width) * 180);
 
-        // 1. تنظيف الحواف للون الأساسي
         const colorCanvas = document.createElement('canvas');
         colorCanvas.width = img.width;
         colorCanvas.height = img.height;
@@ -418,7 +417,6 @@
         }
         cCtx.putImageData(cData, 0, 0);
 
-        // 2. مصفوفة الحجم الهندسي لبناء القبة العضوية للجسم
         const smallCanvas = document.createElement('canvas');
         smallCanvas.width = w;
         smallCanvas.height = h;
@@ -432,11 +430,10 @@
 
         for (let i = 0; i < w * h; i++) {
             const a = sData[i * 4 + 3];
-            dist[i] = a > 100 ? INF : 0;
+            dist[i] = a > 120 ? INF : 0;
             lumArr[i] = (0.299 * sData[i * 4] + 0.587 * sData[i * 4 + 1] + 0.114 * sData[i * 4 + 2]) / 255;
         }
 
-        // تمرير ثنائي لحساب المسافة من حافة الجسم نحو مركز العضلات والجذع
         for (let y = 1; y < h - 1; y++) {
             for (let x = 1; x < w - 1; x++) {
                 const idx = y * w + x;
@@ -471,7 +468,6 @@
             if (dist[i] > maxDist) maxDist = dist[i];
         }
 
-        // رسم خريطة العمق النهائية (تجمع بين انتفاخ الكتلة الدائري وتفاصيل العضلات)
         const depthCanvas = document.createElement('canvas');
         depthCanvas.width = w;
         depthCanvas.height = h;
@@ -480,17 +476,17 @@
         const dp = dImg.data;
 
         for (let i = 0; i < w * h; i++) {
-            if (dist[i] === 0) {
+            if (dist[i] <= 1.2) {
+                // تثبيت الحواف الخارجية تماماً عند الصفر ليلتحم الوجه الأمامي بالخلفي بلا فراغ
                 dp[i * 4] = 0;
                 dp[i * 4 + 1] = 0;
                 dp[i * 4 + 2] = 0;
                 dp[i * 4 + 3] = 255;
             } else {
-                // منحنى دائري ناعم (sin/sqrt) لنفخ الجسم كتمثال حقيقي
-                const norm = Math.min(1, dist[i] / (maxDist * 0.72));
-                const dome = Math.sqrt(1 - Math.pow(1 - norm, 2));
-                const surfaceDetail = lumArr[i] * 0.22;
-                const val = Math.min(255, Math.round((dome * 0.78 + surfaceDetail) * 255));
+                const norm = Math.min(1, (dist[i] - 1.2) / (maxDist * 0.65));
+                const dome = Math.sin(norm * (Math.PI / 2));
+                const detail = lumArr[i] * 0.20 * dome;
+                const val = Math.min(255, Math.round((dome * 0.80 + detail) * 255));
                 dp[i * 4] = val;
                 dp[i * 4 + 1] = val;
                 dp[i * 4 + 2] = val;
@@ -499,7 +495,6 @@
         }
         dCtx.putImageData(dImg, 0, 0);
 
-        // تنعيم خفيف للخريطة لتفادي أي خطوط خشنة
         const smoothDepthCanvas = document.createElement('canvas');
         smoothDepthCanvas.width = w;
         smoothDepthCanvas.height = h;
@@ -515,7 +510,7 @@
         return { cleanColorTex, depthTex };
     }
 
-    function buildVolumetric3DBody(dataUrl) {
+    function buildSculpted3DBody(dataUrl) {
         placeholderBox.style.display = 'none';
         modelViewer.style.display = 'none';
         local3dContainer.style.display = 'block';
@@ -534,12 +529,11 @@
         renderer.setPixelRatio(window.devicePixelRatio);
         local3dContainer.appendChild(renderer.domElement);
 
-        // إضاءة نحتية لإبراز الانحناءات والعضلات
         scene.add(new THREE.AmbientLight(0xffffff, 0.65));
-        const keyLight = new THREE.DirectionalLight(0xffffff, 0.85);
+        const keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
         keyLight.position.set(2.5, 3, 3.5);
         scene.add(keyLight);
-        const rimLight = new THREE.DirectionalLight(0x60a5fa, 0.55);
+        const rimLight = new THREE.DirectionalLight(0x60a5fa, 0.5);
         rimLight.position.set(-2.5, 1, -2.5);
         scene.add(rimLight);
 
@@ -550,65 +544,45 @@
             const planeH = aspect >= 1 ? 1.85 / aspect : 1.85;
 
             const trimValNum = parseInt(trimRange.value, 10);
-            const { cleanColorTex, depthTex } = createVolumetricTextures(img, trimValNum);
-            const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.65;
+            const { cleanColorTex, depthTex } = createSculptedTextures(img, trimValNum);
+            const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.55;
 
-            const geometry = new THREE.PlaneGeometry(planeW, planeH, 160, 160);
+            const geometry = new THREE.PlaneGeometry(planeW, planeH, 180, 180);
 
+            // غلاف أمامي منتفخ للخارج وتلتقي حوافه مع الصفر
             frontMat = new THREE.MeshStandardMaterial({
                 map: cleanColorTex,
                 displacementMap: depthTex,
                 displacementScale: scaleVal,
                 transparent: true,
                 alphaTest: 0.45,
-                roughness: 0.5,
+                roughness: 0.48,
                 metalness: 0.08,
                 side: THREE.FrontSide
             });
 
+            // غلاف خلفي منتفخ للخلف وملتحم تماماً عند الحواف مع الغلاف الأمامي (بدون أي طبقات مكررة)
             backMat = new THREE.MeshStandardMaterial({
                 map: cleanColorTex,
-                color: 0x7c8594,
+                color: 0x8b95a5,
                 displacementMap: depthTex,
                 displacementScale: -scaleVal,
                 transparent: true,
                 alphaTest: 0.45,
-                roughness: 0.8,
+                roughness: 0.78,
                 metalness: 0.05,
                 side: THREE.BackSide
             });
 
             bodyGroup = new THREE.Group();
-            rimMeshes = [];
-
-            // الوجه الأمامي والخلفي
             bodyGroup.add(new THREE.Mesh(geometry, frontMat));
             bodyGroup.add(new THREE.Mesh(geometry, backMat));
-
-            // بناء جدار سُمك جانبي مغلق من 8 طبقات متدرجة بين الأمام والخلف
-            const shellGeo = new THREE.PlaneGeometry(planeW, planeH, 60, 60);
-            const layers = 8;
-            for (let i = 1; i < layers; i++) {
-                const factor = 1 - (2 * i / layers);
-                const shellMat = new THREE.MeshBasicMaterial({
-                    map: cleanColorTex,
-                    color: 0x4b5563,
-                    transparent: true,
-                    alphaTest: 0.5,
-                    side: THREE.DoubleSide
-                });
-                const shellMesh = new THREE.Mesh(shellGeo, shellMat);
-                shellMesh.position.z = factor * (scaleVal * 0.35);
-                rimMeshes.push({ mesh: shellMesh, factor });
-                bodyGroup.add(shellMesh);
-            }
-
             scene.add(bodyGroup);
 
             function animate() {
                 requestAnimationFrame(animate);
                 if (!isDragging && bodyGroup) {
-                    bodyGroup.rotation.y = Math.sin(Date.now() * 0.0015) * 0.52;
+                    bodyGroup.rotation.y = Math.sin(Date.now() * 0.0015) * 0.5;
                 }
                 renderer.render(scene, camera);
             }
@@ -637,12 +611,9 @@
     depthRange.addEventListener('input', (e) => {
         const val = e.target.value;
         depthVal.textContent = val + '%';
-        const s = (val / 100) * 0.65;
+        const s = (val / 100) * 0.55;
         if (frontMat) frontMat.displacementScale = s;
         if (backMat) backMat.displacementScale = -s;
-        rimMeshes.forEach(item => {
-            item.mesh.position.z = item.factor * (s * 0.35);
-        });
     });
 
     trimRange.addEventListener('input', (e) => {
@@ -650,12 +621,12 @@
     });
 
     trimRange.addEventListener('change', () => {
-        if (currentDataUrl) buildVolumetric3DBody(currentDataUrl);
+        if (currentDataUrl) buildSculpted3DBody(currentDataUrl);
     });
 
     instantBtn.addEventListener('click', () => {
         if (!currentDataUrl) return;
-        buildVolumetric3DBody(currentDataUrl);
+        buildSculpted3DBody(currentDataUrl);
     });
 
     cloudBtn.addEventListener('click', () => {
@@ -688,7 +659,7 @@
         instantBtn.disabled = false;
         cloudBtn.disabled = false;
         if (currentDataUrl) {
-            buildVolumetric3DBody(currentDataUrl);
+            buildSculpted3DBody(currentDataUrl);
             showToast(reason);
         }
     };
