@@ -252,7 +252,7 @@
     <h1>استوديو التحويل إلى 3D</h1>
     <div class="header-actions">
         <button id="openTokenBtn" class="token-btn">🔑 HF Token</button>
-        <span class="badge">Dual-View • v4.0</span>
+        <span class="badge">Seamless 360° • v4.1</span>
     </div>
 </header>
 
@@ -261,7 +261,7 @@
 
     <div class="placeholder" id="placeholderBox">
         <div class="placeholder-icon">🥊</div>
-        <p>ارفع <b>صورة الأمام</b> ثم <b>صورة الخلف</b>؛ سيقوم المحرك بمحاذاة الصورتين تلقائياً وبناء مجسم بشري حقيقي <b>360°</b> بالعمق والتحريك!</p>
+        <p>ارفع <b>صورة الأمام</b> ثم <b>صورة الخلف</b>؛ سيقوم المحرك بدمج الحواف وتمديد الألوان لبناء مجسم بشري متصل <b>360°</b> بلا فجوات أو تسنن.</p>
     </div>
 
     <model-viewer id="modelViewer"
@@ -441,7 +441,7 @@
 
         if (frontDataUrl) {
             autoSpin = true;
-            buildDualView3DModel();
+            buildSeamlessDualView3D();
         }
     };
 
@@ -455,7 +455,6 @@
         });
     }
 
-    // استخراج حدود الجسم الفعلية (Bounding Box) لتوسيط ومطابقة الأمام مع الخلف بدقة
     function getSubjectBounds(img, minAlpha) {
         const c = document.createElement('canvas');
         c.width = img.width;
@@ -482,7 +481,74 @@
         return { x: minX, y: minY, w: Math.max(1, maxX - minX + 1), h: Math.max(1, maxY - minY + 1) };
     }
 
-    async function buildDualView3DModel() {
+    // تمديد ألوان الحواف خارج الجسم (Edge Color Dilation) لمنع أي فجوة سوداء أو شفافة بين الأمام والخلف
+    function dilateColors(canvas, minAlpha, passes) {
+        const w = canvas.width;
+        const h = canvas.height;
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, w, h);
+        let data = new Uint8ClampedArray(imgData.data);
+        const alphaMask = new Uint8Array(w * h);
+
+        for (let i = 0; i < w * h; i++) {
+            if (data[i * 4 + 3] >= minAlpha) {
+                alphaMask[i] = 1;
+                data[i * 4 + 3] = 255;
+            } else {
+                alphaMask[i] = 0;
+                data[i * 4] = 0;
+                data[i * 4 + 1] = 0;
+                data[i * 4 + 2] = 0;
+                data[i * 4 + 3] = 0;
+            }
+        }
+
+        const dirs = [-1, 1, -w, w, -w - 1, -w + 1, w - 1, w + 1];
+        for (let p = 0; p < passes; p++) {
+            const next = new Uint8ClampedArray(data);
+            for (let y = 1; y < h - 1; y++) {
+                for (let x = 1; x < w - 1; x++) {
+                    const idx = y * w + x;
+                    const pIdx = idx * 4;
+                    if (data[pIdx + 3] === 0) {
+                        let r = 0, g = 0, b = 0, count = 0;
+                        for (let d = 0; d < dirs.length; d++) {
+                            const nIdx = (idx + dirs[d]) * 4;
+                            if (data[nIdx + 3] > 0) {
+                                r += data[nIdx];
+                                g += data[nIdx + 1];
+                                b += data[nIdx + 2];
+                                count++;
+                            }
+                        }
+                        if (count > 0) {
+                            next[pIdx] = Math.round(r / count);
+                            next[pIdx + 1] = Math.round(g / count);
+                            next[pIdx + 2] = Math.round(b / count);
+                            next[pIdx + 3] = 255;
+                        }
+                    }
+                }
+            }
+            data = next;
+        }
+
+        // ملء أي فراغ متبقٍ بلون دافئ محايد حتى لا يظهر أي بكسل أسود نهائياً
+        for (let i = 0; i < w * h; i++) {
+            if (data[i * 4 + 3] === 0) {
+                data[i * 4] = 140;
+                data[i * 4 + 1] = 105;
+                data[i * 4 + 2] = 85;
+                data[i * 4 + 3] = 255;
+            }
+        }
+
+        imgData.data.set(data);
+        ctx.putImageData(imgData, 0, 0);
+        return alphaMask;
+    }
+
+    async function buildSeamlessDualView3D() {
         if (!frontDataUrl) return;
 
         const frontImg = await loadImageAsync(frontDataUrl);
@@ -507,95 +573,106 @@
         renderer.setPixelRatio(window.devicePixelRatio);
         local3dContainer.appendChild(renderer.domElement);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.82));
-        const keyLight = new THREE.DirectionalLight(0xffffff, 0.72);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 0.65);
         keyLight.position.set(2, 3, 4);
         scene.add(keyLight);
-        const backLight = new THREE.DirectionalLight(0xffffff, 0.72);
+        const backLight = new THREE.DirectionalLight(0xffffff, 0.65);
         backLight.position.set(-2, 2, -4);
         scene.add(backLight);
 
         const trimValNum = parseInt(trimRange.value, 10);
         const minAlpha = Math.round((trimValNum / 100) * 255);
 
-        // محاذاة الصورتين في إطار موحد متمركز
         const fBounds = getSubjectBounds(frontImg, minAlpha);
-        const targetH = 720;
+        const targetH = 640;
         const aspect = fBounds.w / fBounds.h;
-        const targetW = Math.max(240, Math.round(targetH * aspect));
+        const targetW = Math.max(220, Math.round(targetH * aspect));
 
+        // 1. لوحة الأمام مع تمديد ألوان الحواف
+        const frontCanvas = document.createElement('canvas');
+        frontCanvas.width = targetW;
+        frontCanvas.height = targetH;
+        const fCtx = frontCanvas.getContext('2d');
+        fCtx.drawImage(frontImg, fBounds.x, fBounds.y, fBounds.w, fBounds.h, 0, 0, targetW, targetH);
+        const frontMask = dilateColors(frontCanvas, minAlpha, 18);
+
+        // 2. لوحة الخلف مع عكسها أفقياً وتمديد ألوان الحواف
+        const backCanvas = document.createElement('canvas');
+        backCanvas.width = targetW;
+        backCanvas.height = targetH;
+        const bCtx = backCanvas.getContext('2d');
+        let backMask = null;
+
+        if (backImg) {
+            const bBounds = getSubjectBounds(backImg, minAlpha);
+            bCtx.save();
+            bCtx.translate(targetW, 0);
+            bCtx.scale(-1, 1);
+            bCtx.drawImage(backImg, bBounds.x, bBounds.y, bBounds.w, bBounds.h, 0, 0, targetW, targetH);
+            bCtx.restore();
+            backMask = dilateColors(backCanvas, minAlpha, 18);
+        } else {
+            bCtx.filter = 'blur(8px) brightness(0.75)';
+            bCtx.drawImage(frontCanvas, 0, 0);
+            bCtx.filter = 'none';
+            backMask = frontMask;
+        }
+
+        // 3. دمج الصورتين في Atlas واحد مع شريط مزج ناعم للحواف
         const atlasCanvas = document.createElement('canvas');
         atlasCanvas.width = targetW * 2;
         atlasCanvas.height = targetH;
         const aCtx = atlasCanvas.getContext('2d');
-
-        // 1. رسم صورة الأمام في النصف الأيسر (0 -> targetW)
-        aCtx.drawImage(frontImg, fBounds.x, fBounds.y, fBounds.w, fBounds.h, 0, 0, targetW, targetH);
-
-        // 2. رسم صورة الخلف الحقيقية مع عكسها أفقياً في النصف الأيمن (targetW -> targetW*2) لتطابق الأطراف 360°
-        if (backImg) {
-            const bBounds = getSubjectBounds(backImg, minAlpha);
-            aCtx.save();
-            aCtx.translate(targetW * 2, 0);
-            aCtx.scale(-1, 1);
-            aCtx.drawImage(backImg, bBounds.x, bBounds.y, bBounds.w, bBounds.h, 0, 0, targetW, targetH);
-            aCtx.restore();
-        } else {
-            // في حال عدم رفع صورة الخلف بعد، نضع نسيجاً مظللاً خفيفاً حتى يرفع المستخدم صورة الخلف
-            aCtx.save();
-            aCtx.filter = 'blur(8px) brightness(0.65)';
-            aCtx.drawImage(atlasCanvas, 0, 0, targetW, targetH, targetW, 0, targetW, targetH);
-            aCtx.restore();
-        }
-
-        // تنظيف الألفا وتنعيم الحواف في كلا النصفين
-        const fullData = aCtx.getImageData(0, 0, targetW * 2, targetH);
-        const fd = fullData.data;
-        for (let i = 0; i < fd.length; i += 4) {
-            if (fd[i + 3] < minAlpha) fd[i + 3] = 0;
-        }
-        aCtx.putImageData(fullData, 0, 0);
+        aCtx.drawImage(frontCanvas, 0, 0);
+        aCtx.drawImage(backCanvas, targetW, 0);
 
         const atlasTex = new THREE.CanvasTexture(atlasCanvas);
         atlasTex.needsUpdate = true;
 
-        // 3. بناء شبكة الارتفاع والعمق الموحدة (Union of Front & Back Silhouettes)
-        const gw = 170;
-        const gh = Math.round((targetH / targetW) * 170);
+        // 4. بناء قناع موحد ناعم (Smooth Combined Mask)
+        const gw = 160;
+        const gh = Math.round((targetH / targetW) * 160);
 
-        const maskCanvas = document.createElement('canvas');
-        maskCanvas.width = gw * 2;
-        maskCanvas.height = gh;
-        const mCtx = maskCanvas.getContext('2d');
-        mCtx.drawImage(atlasCanvas, 0, 0, gw * 2, gh);
-        const mData = mCtx.getImageData(0, 0, gw * 2, gh).data;
-
-        const inside = new Uint8Array(gw * gh);
-        const dist = new Float32Array(gw * gh);
-        const lumFront = new Float32Array(gw * gh);
-        const lumBack = new Float32Array(gw * gh);
-        const INF = 9999;
-
+        const rawMask = new Float32Array(gw * gh);
         for (let y = 0; y < gh; y++) {
             for (let x = 0; x < gw; x++) {
-                const i = y * gw + x;
-                const fIdx = (y * (gw * 2) + x) * 4;
-                const bIdx = (y * (gw * 2) + (gw + x)) * 4;
-
-                const aFront = mData[fIdx + 3];
-                const aBack = backImg ? mData[bIdx + 3] : 0;
-                const isBody = (aFront >= 120 || aBack >= 120);
-
-                if (x > 1 && x < gw - 2 && y > 1 && y < gh - 2 && isBody) {
-                    inside[i] = 1;
-                    dist[i] = INF;
-                }
-                lumFront[i] = (0.299 * mData[fIdx] + 0.587 * mData[fIdx + 1] + 0.114 * mData[fIdx + 2]) / 255;
-                lumBack[i] = (0.299 * mData[bIdx] + 0.587 * mData[bIdx + 1] + 0.114 * mData[bIdx + 2]) / 255;
+                const sx = Math.min(targetW - 1, Math.round((x / (gw - 1)) * (targetW - 1)));
+                const sy = Math.min(targetH - 1, Math.round((y / (gh - 1)) * (targetH - 1)));
+                const mIdx = sy * targetW + sx;
+                const inF = frontMask[mIdx];
+                const inB = backMask[mIdx];
+                // استخدام التقاطع المرن أو الاتحاد المنعّم لمنع البروزات الشاذة
+                rawMask[y * gw + x] = (inF && inB) ? 1.0 : ((inF || inB) ? 0.65 : 0.0);
             }
         }
 
-        // تنعيم الحدود الموحدة لإزالة التسنن عند الجوانب
+        // تمرير تنعيم على القناع لإزالة أي نتوءات قبل بناء الشبكة
+        const smoothMask = new Float32Array(gw * gh);
+        for (let y = 1; y < gh - 1; y++) {
+            for (let x = 1; x < gw - 1; x++) {
+                const i = y * gw + x;
+                const sum = rawMask[i] * 4 +
+                    (rawMask[i - 1] + rawMask[i + 1] + rawMask[i - gw] + rawMask[i + gw]) * 2 +
+                    (rawMask[i - gw - 1] + rawMask[i - gw + 1] + rawMask[i + gw - 1] + rawMask[i + gw + 1]);
+                smoothMask[i] = sum / 16.0;
+            }
+        }
+
+        const inside = new Uint8Array(gw * gh);
+        const dist = new Float32Array(gw * gh);
+        const INF = 9999;
+
+        for (let y = 2; y < gh - 2; y++) {
+            for (let x = 2; x < gw - 2; x++) {
+                const i = y * gw + x;
+                if (smoothMask[i] >= 0.48) {
+                    inside[i] = 1;
+                    dist[i] = INF;
+                }
+            }
+        }
+
         for (let y = 1; y < gh - 1; y++) {
             for (let x = 1; x < gw - 1; x++) {
                 const idx = y * gw + x;
@@ -624,7 +701,7 @@
 
         const frontIdxMap = new Int32Array(gw * gh).fill(-1);
         const backIdxMap = new Int32Array(gw * gh).fill(-1);
-        const radius = 13.0;
+        const radius = 16.0;
 
         for (let y = 0; y < gh; y++) {
             for (let x = 0; x < gw; x++) {
@@ -647,22 +724,21 @@
                     frontIdxMap[i] = vIdx;
                     backIdxMap[i] = vIdx;
                 } else {
-                    const norm = Math.min(1, dist[i] / radius);
-                    const dome = Math.sin(norm * (Math.PI / 2));
-                    const depthF = dome * 0.82 + (lumFront[i] * 0.18 * dome);
-                    const depthB = dome * 0.82 + (lumBack[i] * 0.18 * dome);
+                    // منحنى Smoothstep ناعم جداً يمنع أي أشواك عند زيادة السُمك
+                    const t = Math.min(1, dist[i] / radius);
+                    const smoothDome = t * t * (3 - 2 * t);
 
                     const fIdx = positions.length / 3;
-                    positions.push(px, py, depthF);
+                    positions.push(px, py, smoothDome);
                     uvs.push(uNorm * 0.5, vNorm);
-                    zBaseList.push(depthF);
+                    zBaseList.push(smoothDome);
                     signList.push(1);
                     frontIdxMap[i] = fIdx;
 
                     const bIdx = positions.length / 3;
-                    positions.push(px, py, -depthB);
+                    positions.push(px, py, -smoothDome);
                     uvs.push(0.5 + uNorm * 0.5, vNorm);
-                    zBaseList.push(depthB);
+                    zBaseList.push(smoothDome);
                     signList.push(-1);
                     backIdxMap[i] = bIdx;
                 }
@@ -694,16 +770,16 @@
         geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
         geometry.setIndex(indices);
 
-        // تنعيم مواضع رؤوس الحواف الخارجية لإزالة التسنن (Laplacian Boundary Smoothing)
-        smoothBoundaryVertices(geometry, 2);
+        // تنعيم كامل للشبكة (3D Laplacian Smoothing) لإزالة التسنن المنشاري تماماً
+        smoothFullMesh(geometry, 4);
 
-        const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.36;
+        const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.38;
         applyThicknessToGeometry(geometry, scaleVal);
 
         const material = new THREE.MeshStandardMaterial({
             map: atlasTex,
-            roughness: 0.5,
-            metalness: 0.05
+            roughness: 0.55,
+            metalness: 0.04
         });
 
         unifiedMesh = new THREE.Mesh(geometry, material);
@@ -744,7 +820,7 @@
         dom.addEventListener('touchend', () => { isDragging = false; });
     }
 
-    function smoothBoundaryVertices(geo, iterations) {
+    function smoothFullMesh(geo, iterations) {
         const pos = geo.attributes.position;
         const idx = geo.index.array;
         const count = pos.count;
@@ -760,25 +836,29 @@
         for (let it = 0; it < iterations; it++) {
             const newX = new Float32Array(count);
             const newY = new Float32Array(count);
+            const newZ = new Float32Array(count);
             for (let i = 0; i < count; i++) {
-                if (sideSigns[i] === 0 && neighbors[i].size > 0) {
-                    let sx = 0, sy = 0, n = 0;
+                if (neighbors[i].size > 0) {
+                    let sx = 0, sy = 0, sz = 0, n = 0;
                     neighbors[i].forEach(nb => {
-                        if (sideSigns[nb] === 0) {
-                            sx += pos.getX(nb);
-                            sy += pos.getY(nb);
-                            n++;
-                        }
+                        sx += pos.getX(nb);
+                        sy += pos.getY(nb);
+                        sz += baseZValues[nb];
+                        n++;
                     });
-                    newX[i] = n > 0 ? (pos.getX(i) * 0.4 + (sx / n) * 0.6) : pos.getX(i);
-                    newY[i] = n > 0 ? (pos.getY(i) * 0.4 + (sy / n) * 0.6) : pos.getY(i);
+                    const weight = sideSigns[i] === 0 ? 0.65 : 0.35;
+                    newX[i] = pos.getX(i) * (1 - weight) + (sx / n) * weight;
+                    newY[i] = pos.getY(i) * (1 - weight) + (sy / n) * weight;
+                    newZ[i] = baseZValues[i] * 0.55 + (sz / n) * 0.45;
                 } else {
                     newX[i] = pos.getX(i);
                     newY[i] = pos.getY(i);
+                    newZ[i] = baseZValues[i];
                 }
             }
             for (let i = 0; i < count; i++) {
                 pos.setXY(i, newX[i], newY[i]);
+                baseZValues[i] = newZ[i];
             }
         }
         pos.needsUpdate = true;
@@ -797,7 +877,7 @@
     depthRange.addEventListener('input', (e) => {
         const val = e.target.value;
         depthVal.textContent = val + '%';
-        const s = (val / 100) * 0.36;
+        const s = (val / 100) * 0.38;
         if (unifiedMesh) {
             applyThicknessToGeometry(unifiedMesh.geometry, s);
         }
@@ -808,13 +888,13 @@
     });
 
     trimRange.addEventListener('change', () => {
-        if (frontDataUrl) buildDualView3DModel();
+        if (frontDataUrl) buildSeamlessDualView3D();
     });
 
     instantBtn.addEventListener('click', () => {
         if (!frontDataUrl) return;
         autoSpin = true;
-        buildDualView3DModel();
+        buildSeamlessDualView3D();
     });
 
     cloudBtn.addEventListener('click', () => {
@@ -847,7 +927,7 @@
         instantBtn.disabled = false;
         cloudBtn.disabled = false;
         if (frontDataUrl) {
-            buildDualView3DModel();
+            buildSeamlessDualView3D();
             showToast(reason);
         }
     };
