@@ -37,9 +37,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var pickMediaLauncher: ActivityResultLauncher<PickVisualMediaRequest>
     private var currentFrontBytes: ByteArray? = null
-    private var pendingTargetSide: String = "front" // "front" or "back"
-    private var lastFrontUri: Uri? = null
-    private var lastBackUri: Uri? = null
+    private var pendingTargetSide: String = "front" // "front", "back", "right", "left"
+    private val sideUris = mutableMapOf<String, Uri>()
     private var autoIsolateEnabled: Boolean = true
 
     private val segmenter by lazy {
@@ -58,11 +57,7 @@ class MainActivity : AppCompatActivity() {
             ActivityResultContracts.PickVisualMedia()
         ) { uri: Uri? ->
             if (uri != null) {
-                if (pendingTargetSide == "back") {
-                    lastBackUri = uri
-                } else {
-                    lastFrontUri = uri
-                }
+                sideUris[pendingTargetSide] = uri
                 processSelectedImage(uri, pendingTargetSide)
             }
         }
@@ -112,8 +107,9 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun setAutoIsolate(enabled: Boolean) {
             autoIsolateEnabled = enabled
-            lastFrontUri?.let { processSelectedImage(it, "front") }
-            lastBackUri?.let { processSelectedImage(it, "back") }
+            sideUris.forEach { (side, uri) ->
+                processSelectedImage(uri, side)
+            }
         }
 
         @JavascriptInterface
