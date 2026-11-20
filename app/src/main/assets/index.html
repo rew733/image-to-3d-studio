@@ -252,7 +252,7 @@
     <h1>استوديو التحويل إلى 3D</h1>
     <div class="header-actions">
         <button id="openTokenBtn" class="token-btn">🔑 HF Token</button>
-        <span class="badge">Seamless 360° • v4.1</span>
+        <span class="badge">Pure Skin 360° • v4.2</span>
     </div>
 </header>
 
@@ -261,7 +261,7 @@
 
     <div class="placeholder" id="placeholderBox">
         <div class="placeholder-icon">🥊</div>
-        <p>ارفع <b>صورة الأمام</b> ثم <b>صورة الخلف</b>؛ سيقوم المحرك بدمج الحواف وتمديد الألوان لبناء مجسم بشري متصل <b>360°</b> بلا فجوات أو تسنن.</p>
+        <p>ارفع <b>صورة الأمام</b> ثم <b>صورة الخلف</b>؛ يقوم المحرك بتقشير الهالات البيضاء ودمج ألوان البشرة والملابس لبناء مجسم بشري متكامل <b>360°</b>.</p>
     </div>
 
     <model-viewer id="modelViewer"
@@ -285,9 +285,9 @@
         <div class="slider-row">
             <div class="depth-header">
                 <span>تنظيف وقص الحواف (Edge Trim)</span>
-                <span id="trimVal">45%</span>
+                <span id="trimVal">55%</span>
             </div>
-            <input type="range" id="trimRange" min="10" max="95" value="45">
+            <input type="range" id="trimRange" min="10" max="95" value="55">
         </div>
     </div>
 
@@ -441,7 +441,7 @@
 
         if (frontDataUrl) {
             autoSpin = true;
-            buildSeamlessDualView3D();
+            buildPureSkinDualView3D();
         }
     };
 
@@ -467,8 +467,10 @@
         let found = false;
         for (let y = 0; y < c.height; y++) {
             for (let x = 0; x < c.width; x++) {
-                const a = data[(y * c.width + x) * 4 + 3];
-                if (a >= minAlpha) {
+                const idx = (y * c.width + x) * 4;
+                const a = data[idx + 3];
+                const isWhite = data[idx] > 235 && data[idx + 1] > 235 && data[idx + 2] > 235;
+                if (a >= minAlpha && !isWhite) {
                     if (x < minX) minX = x;
                     if (x > maxX) maxX = x;
                     if (y < minY) minY = y;
@@ -481,43 +483,74 @@
         return { x: minX, y: minY, w: Math.max(1, maxX - minX + 1), h: Math.max(1, maxY - minY + 1) };
     }
 
-    // تمديد ألوان الحواف خارج الجسم (Edge Color Dilation) لمنع أي فجوة سوداء أو شفافة بين الأمام والخلف
-    function dilateColors(canvas, minAlpha, passes) {
+    // تقشير الهالة البيضاء (3px Alpha Erosion) ثم تمديد الألوان الداخلية الحقيقية
+    function stripWhiteFringeAndDilate(canvas, minAlpha, erodePasses, dilatePasses) {
         const w = canvas.width;
         const h = canvas.height;
         const ctx = canvas.getContext('2d');
         const imgData = ctx.getImageData(0, 0, w, h);
-        let data = new Uint8ClampedArray(imgData.data);
-        const alphaMask = new Uint8Array(w * h);
+        const src = imgData.data;
 
+        // 1. بناء قناع أولي مع إزالة البكسلات البيضاء الشبه شفافة على الحواف
+        let mask = new Uint8Array(w * h);
         for (let i = 0; i < w * h; i++) {
-            if (data[i * 4 + 3] >= minAlpha) {
-                alphaMask[i] = 1;
-                data[i * 4 + 3] = 255;
+            const p = i * 4;
+            const a = src[p + 3];
+            const r = src[p], g = src[p + 1], b = src[p + 2];
+            const isBrightWhite = (r > 230 && g > 230 && b > 230);
+            mask[i] = (a >= minAlpha && !isBrightWhite) ? 1 : 0;
+        }
+
+        // 2. تقشير (Erosion) بمقدار 3 بكسلات للتخلص من أي بقايا خلفية بيضاء على محيط الجسم
+        const dirs4 = [-1, 1, -w, w];
+        for (let e = 0; e < erodePasses; e++) {
+            const eroded = new Uint8Array(mask);
+            for (let y = 1; y < h - 1; y++) {
+                for (let x = 1; x < w - 1; x++) {
+                    const idx = y * w + x;
+                    if (mask[idx] === 1) {
+                        for (let d = 0; d < 4; d++) {
+                            if (mask[idx + dirs4[d]] === 0) {
+                                eroded[idx] = 0;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            mask = eroded;
+        }
+
+        // تجهيز مصفوفة الألوان النقية (تحتوي فقط على بكسلات الجسم الحقيقية)
+        let colorData = new Uint8ClampedArray(w * h * 4);
+        for (let i = 0; i < w * h; i++) {
+            const p = i * 4;
+            if (mask[i] === 1) {
+                colorData[p] = src[p];
+                colorData[p + 1] = src[p + 1];
+                colorData[p + 2] = src[p + 2];
+                colorData[p + 3] = 255;
             } else {
-                alphaMask[i] = 0;
-                data[i * 4] = 0;
-                data[i * 4 + 1] = 0;
-                data[i * 4 + 2] = 0;
-                data[i * 4 + 3] = 0;
+                colorData[p + 3] = 0;
             }
         }
 
-        const dirs = [-1, 1, -w, w, -w - 1, -w + 1, w - 1, w + 1];
-        for (let p = 0; p < passes; p++) {
-            const next = new Uint8ClampedArray(data);
+        // 3. تمديد الألوان النقية للخارج (Color Bleeding) ليأخذ الجانب لون البشرة أو القماش الحقيقي
+        const dirs8 = [-1, 1, -w, w, -w - 1, -w + 1, w - 1, w + 1];
+        for (let dPass = 0; dPass < dilatePasses; dPass++) {
+            const next = new Uint8ClampedArray(colorData);
             for (let y = 1; y < h - 1; y++) {
                 for (let x = 1; x < w - 1; x++) {
                     const idx = y * w + x;
                     const pIdx = idx * 4;
-                    if (data[pIdx + 3] === 0) {
+                    if (colorData[pIdx + 3] === 0) {
                         let r = 0, g = 0, b = 0, count = 0;
-                        for (let d = 0; d < dirs.length; d++) {
-                            const nIdx = (idx + dirs[d]) * 4;
-                            if (data[nIdx + 3] > 0) {
-                                r += data[nIdx];
-                                g += data[nIdx + 1];
-                                b += data[nIdx + 2];
+                        for (let d = 0; d < 8; d++) {
+                            const nIdx = (idx + dirs8[d]) * 4;
+                            if (colorData[nIdx + 3] > 0) {
+                                r += colorData[nIdx];
+                                g += colorData[nIdx + 1];
+                                b += colorData[nIdx + 2];
                                 count++;
                             }
                         }
@@ -530,25 +563,26 @@
                     }
                 }
             }
-            data = next;
+            colorData = next;
         }
 
-        // ملء أي فراغ متبقٍ بلون دافئ محايد حتى لا يظهر أي بكسل أسود نهائياً
+        // تعبئة أي مساحة بعيدة بلون البشرة الدافئ الطبيعي (بدل الأبيض)
         for (let i = 0; i < w * h; i++) {
-            if (data[i * 4 + 3] === 0) {
-                data[i * 4] = 140;
-                data[i * 4 + 1] = 105;
-                data[i * 4 + 2] = 85;
-                data[i * 4 + 3] = 255;
+            const p = i * 4;
+            if (colorData[p + 3] === 0) {
+                colorData[p] = 135;
+                colorData[p + 1] = 95;
+                colorData[p + 2] = 75;
+                colorData[p + 3] = 255;
             }
         }
 
-        imgData.data.set(data);
+        imgData.data.set(colorData);
         ctx.putImageData(imgData, 0, 0);
-        return alphaMask;
+        return { mask, colorData };
     }
 
-    async function buildSeamlessDualView3D() {
+    async function buildPureSkinDualView3D() {
         if (!frontDataUrl) return;
 
         const frontImg = await loadImageAsync(frontDataUrl);
@@ -585,24 +619,24 @@
         const minAlpha = Math.round((trimValNum / 100) * 255);
 
         const fBounds = getSubjectBounds(frontImg, minAlpha);
-        const targetH = 640;
+        const targetH = 600;
         const aspect = fBounds.w / fBounds.h;
-        const targetW = Math.max(220, Math.round(targetH * aspect));
+        const targetW = Math.max(200, Math.round(targetH * aspect));
 
-        // 1. لوحة الأمام مع تمديد ألوان الحواف
+        // 1. لوحة الأمام النظيفة من الهالة البيضاء
         const frontCanvas = document.createElement('canvas');
         frontCanvas.width = targetW;
         frontCanvas.height = targetH;
         const fCtx = frontCanvas.getContext('2d');
         fCtx.drawImage(frontImg, fBounds.x, fBounds.y, fBounds.w, fBounds.h, 0, 0, targetW, targetH);
-        const frontMask = dilateColors(frontCanvas, minAlpha, 18);
+        const frontRes = stripWhiteFringeAndDilate(frontCanvas, minAlpha, 3, 24);
 
-        // 2. لوحة الخلف مع عكسها أفقياً وتمديد ألوان الحواف
+        // 2. لوحة الخلف النظيفة من الهالة البيضاء
         const backCanvas = document.createElement('canvas');
         backCanvas.width = targetW;
         backCanvas.height = targetH;
         const bCtx = backCanvas.getContext('2d');
-        let backMask = null;
+        let backRes = null;
 
         if (backImg) {
             const bBounds = getSubjectBounds(backImg, minAlpha);
@@ -611,15 +645,15 @@
             bCtx.scale(-1, 1);
             bCtx.drawImage(backImg, bBounds.x, bBounds.y, bBounds.w, bBounds.h, 0, 0, targetW, targetH);
             bCtx.restore();
-            backMask = dilateColors(backCanvas, minAlpha, 18);
+            backRes = stripWhiteFringeAndDilate(backCanvas, minAlpha, 3, 24);
         } else {
             bCtx.filter = 'blur(8px) brightness(0.75)';
             bCtx.drawImage(frontCanvas, 0, 0);
             bCtx.filter = 'none';
-            backMask = frontMask;
+            backRes = frontRes;
         }
 
-        // 3. دمج الصورتين في Atlas واحد مع شريط مزج ناعم للحواف
+        // 3. دمج الصورتين في Atlas واحد
         const atlasCanvas = document.createElement('canvas');
         atlasCanvas.width = targetW * 2;
         atlasCanvas.height = targetH;
@@ -640,14 +674,12 @@
                 const sx = Math.min(targetW - 1, Math.round((x / (gw - 1)) * (targetW - 1)));
                 const sy = Math.min(targetH - 1, Math.round((y / (gh - 1)) * (targetH - 1)));
                 const mIdx = sy * targetW + sx;
-                const inF = frontMask[mIdx];
-                const inB = backMask[mIdx];
-                // استخدام التقاطع المرن أو الاتحاد المنعّم لمنع البروزات الشاذة
+                const inF = frontRes.mask[mIdx];
+                const inB = backRes.mask[mIdx];
                 rawMask[y * gw + x] = (inF && inB) ? 1.0 : ((inF || inB) ? 0.65 : 0.0);
             }
         }
 
-        // تمرير تنعيم على القناع لإزالة أي نتوءات قبل بناء الشبكة
         const smoothMask = new Float32Array(gw * gh);
         for (let y = 1; y < gh - 1; y++) {
             for (let x = 1; x < gw - 1; x++) {
@@ -695,6 +727,7 @@
 
         const positions = [];
         const uvs = [];
+        const colors = [];
         const indices = [];
         const zBaseList = [];
         const signList = [];
@@ -715,22 +748,32 @@
                 const uNorm = x / (gw - 1);
                 const vNorm = 1.0 - (y / (gh - 1));
 
+                const sx = Math.min(targetW - 1, Math.round(uNorm * (targetW - 1)));
+                const sy = Math.min(targetH - 1, Math.round((1.0 - vNorm) * (targetH - 1)));
+                const pIdx = (sy * targetW + sx) * 4;
+
                 if (isBoundary) {
+                    // مزج لوني 50% أمام + 50% خلف عند الحافة الجانبية المشتركة لإزالة خط اللحام تماماً
+                    const r = ((frontRes.colorData[pIdx] + backRes.colorData[pIdx]) * 0.5) / 255;
+                    const g = ((frontRes.colorData[pIdx + 1] + backRes.colorData[pIdx + 1]) * 0.5) / 255;
+                    const b = ((frontRes.colorData[pIdx + 2] + backRes.colorData[pIdx + 2]) * 0.5) / 255;
+
                     const vIdx = positions.length / 3;
                     positions.push(px, py, 0);
                     uvs.push(uNorm * 0.5, vNorm);
+                    colors.push(r, g, b);
                     zBaseList.push(0);
                     signList.push(0);
                     frontIdxMap[i] = vIdx;
                     backIdxMap[i] = vIdx;
                 } else {
-                    // منحنى Smoothstep ناعم جداً يمنع أي أشواك عند زيادة السُمك
                     const t = Math.min(1, dist[i] / radius);
                     const smoothDome = t * t * (3 - 2 * t);
 
                     const fIdx = positions.length / 3;
                     positions.push(px, py, smoothDome);
                     uvs.push(uNorm * 0.5, vNorm);
+                    colors.push(1, 1, 1);
                     zBaseList.push(smoothDome);
                     signList.push(1);
                     frontIdxMap[i] = fIdx;
@@ -738,6 +781,7 @@
                     const bIdx = positions.length / 3;
                     positions.push(px, py, -smoothDome);
                     uvs.push(0.5 + uNorm * 0.5, vNorm);
+                    colors.push(1, 1, 1);
                     zBaseList.push(smoothDome);
                     signList.push(-1);
                     backIdxMap[i] = bIdx;
@@ -768,9 +812,9 @@
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
         geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
         geometry.setIndex(indices);
 
-        // تنعيم كامل للشبكة (3D Laplacian Smoothing) لإزالة التسنن المنشاري تماماً
         smoothFullMesh(geometry, 4);
 
         const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.38;
@@ -778,6 +822,7 @@
 
         const material = new THREE.MeshStandardMaterial({
             map: atlasTex,
+            vertexColors: true,
             roughness: 0.55,
             metalness: 0.04
         });
@@ -888,13 +933,13 @@
     });
 
     trimRange.addEventListener('change', () => {
-        if (frontDataUrl) buildSeamlessDualView3D();
+        if (frontDataUrl) buildPureSkinDualView3D();
     });
 
     instantBtn.addEventListener('click', () => {
         if (!frontDataUrl) return;
         autoSpin = true;
-        buildSeamlessDualView3D();
+        buildPureSkinDualView3D();
     });
 
     cloudBtn.addEventListener('click', () => {
@@ -927,7 +972,7 @@
         instantBtn.disabled = false;
         cloudBtn.disabled = false;
         if (frontDataUrl) {
-            buildSeamlessDualView3D();
+            buildPureSkinDualView3D();
             showToast(reason);
         }
     };
