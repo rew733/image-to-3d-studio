@@ -36,8 +36,10 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var pickMediaLauncher: ActivityResultLauncher<PickVisualMediaRequest>
-    private var currentImageBytes: ByteArray? = null
-    private var lastSelectedUri: Uri? = null
+    private var currentFrontBytes: ByteArray? = null
+    private var pendingTargetSide: String = "front" // "front" or "back"
+    private var lastFrontUri: Uri? = null
+    private var lastBackUri: Uri? = null
     private var autoIsolateEnabled: Boolean = true
 
     private val segmenter by lazy {
@@ -56,8 +58,12 @@ class MainActivity : AppCompatActivity() {
             ActivityResultContracts.PickVisualMedia()
         ) { uri: Uri? ->
             if (uri != null) {
-                lastSelectedUri = uri
-                processSelectedImage(uri)
+                if (pendingTargetSide == "back") {
+                    lastBackUri = uri
+                } else {
+                    lastFrontUri = uri
+                }
+                processSelectedImage(uri, pendingTargetSide)
             }
         }
 
@@ -94,7 +100,8 @@ class MainActivity : AppCompatActivity() {
 
     inner class WebAppInterface {
         @JavascriptInterface
-        fun openGallery() {
+        fun openGalleryForSide(side: String) {
+            pendingTargetSide = side
             runOnUiThread {
                 pickMediaLauncher.launch(
                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -105,7 +112,8 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun setAutoIsolate(enabled: Boolean) {
             autoIsolateEnabled = enabled
-            lastSelectedUri?.let { processSelectedImage(it) }
+            lastFrontUri?.let { processSelectedImage(it, "front") }
+            lastBackUri?.let { processSelectedImage(it, "back") }
         }
 
         @JavascriptInterface
@@ -124,9 +132,9 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun startCloud3D() {
-            val bytes = currentImageBytes
+            val bytes = currentFrontBytes
             if (bytes == null) {
-                sendCloudFallback("يرجى اختيار صورة أولاً.")
+                sendCloudFallback("يرجى اختيار صورة الأمام أولاً.")
                 return
             }
             val token = getHfToken()
@@ -136,7 +144,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun processSelectedImage(uri: Uri) {
+    private fun processSelectedImage(uri: Uri, side: String) {
         Thread {
             try {
                 val inputStream = contentResolver.openInputStream(uri)
@@ -155,12 +163,11 @@ class MainActivity : AppCompatActivity() {
                 val newHeight = (originalBitmap.height * scale).toInt()
                 val scaledBitmap = Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
 
-                // فحص ذكي: هل الصورة مفرغة مسبقاً (شفافة) أو ذات خلفية بيضاء صماء؟
                 val alreadyIsolated = isAlreadyCutoutOrPlainBg(scaledBitmap)
 
                 if (!autoIsolateEnabled || alreadyIsolated) {
                     val cleanBitmap = removePureWhiteCornersIfNeeded(scaledBitmap)
-                    sendBitmapToWebView(cleanBitmap)
+                    sendBitmapToWebView(cleanBitmap, side)
                     return@Thread
                 }
 
@@ -183,10 +190,9 @@ class MainActivity : AppCompatActivity() {
                                     if (c > 0.7f) foregroundCount++
                                 }
 
-                                // إذا فشل النموذج وعكس القناع (أقل من 3% أو أكثر من 92% من الصورة)، نستخدم الصورة الأصلية
                                 val ratio = foregroundCount.toFloat() / confidences.size
                                 if (ratio < 0.03f || ratio > 0.92f) {
-                                    sendBitmapToWebView(scaledBitmap)
+                                    sendBitmapToWebView(scaledBitmap, side)
                                     return@Thread
                                 }
 
@@ -211,15 +217,15 @@ class MainActivity : AppCompatActivity() {
 
                                 val cutoutBitmap = Bitmap.createBitmap(maskWidth, maskHeight, Bitmap.Config.ARGB_8888)
                                 cutoutBitmap.setPixels(pixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
-                                sendBitmapToWebView(cutoutBitmap)
+                                sendBitmapToWebView(cutoutBitmap, side)
 
                             } catch (e: Exception) {
-                                sendBitmapToWebView(scaledBitmap)
+                                sendBitmapToWebView(scaledBitmap, side)
                             }
                         }.start()
                     }
                     .addOnFailureListener {
-                        sendBitmapToWebView(scaledBitmap)
+                        sendBitmapToWebView(scaledBitmap, side)
                     }
             } catch (e: Exception) {
                 sendCloudFallback("تعذر قراءة الصورة: ${e.localizedMessage}")
@@ -227,7 +233,6 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    // يفحص زوايا الصورة لمعرفة إن كانت شفافة مسبقاً أو ذات خلفية بيضاء صماء
     private fun isAlreadyCutoutOrPlainBg(bmp: Bitmap): Boolean {
         val w = bmp.width
         val h = bmp.height
@@ -247,7 +252,6 @@ class MainActivity : AppCompatActivity() {
         return pureWhiteCorners >= 4
     }
 
-    // يحوّل الخلفية البيضاء الصماء إلى شفافية حقيقية إذا رفع المستخدم صورة مفرغة بخلفية بيضاء
     private fun removePureWhiteCornersIfNeeded(bmp: Bitmap): Bitmap {
         val w = bmp.width
         val h = bmp.height
@@ -278,27 +282,29 @@ class MainActivity : AppCompatActivity() {
         return bmp
     }
 
-    private fun sendBitmapToWebView(bitmap: Bitmap) {
+    private fun sendBitmapToWebView(bitmap: Bitmap, side: String) {
         val outputStream = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
         val byteArray = outputStream.toByteArray()
-        currentImageBytes = byteArray
+        if (side == "front") {
+            currentFrontBytes = byteArray
+        }
         val base64String = Base64.encodeToString(byteArray, Base64.NO_WRAP)
         val dataUrl = "data:image/png;base64,$base64String"
         runOnUiThread {
-            webView.evaluateJavascript("window.onImageSelectedFromAndroid('$dataUrl');", null)
+            webView.evaluateJavascript("window.onSideImageSelected('$side', '$dataUrl');", null)
         }
     }
 
     private fun runCloudConversion(imageBytes: ByteArray, hfToken: String) {
         val spaces = listOf(
-            "https://tencent-hunyuan3d-2.hf.space",
-            "https://jeffreyxiang-trellis.hf.space",
-            "https://vast-ai-research-triposg.hf.space",
-            "https://stabilityai-triposr.hf.space"
+            "https://stabilityai-triposr.hf.space",
+            "https://hysts-triposr.hf.space",
+            "https://zxhezexin-openlrm.hf.space",
+            "https://ashawkey-lgm.hf.space"
         )
 
-        var lastError = "الخوادم السحابية مشغولة حالياً."
+        var lastError = "الخوادم السحابية المجانية مشغولة حالياً."
 
         for (spaceUrl in spaces) {
             try {
@@ -313,7 +319,7 @@ class MainActivity : AppCompatActivity() {
                     put("meta", JSONObject().put("_type", "gradio.FileData"))
                 }
 
-                updateStatus("جاري بناء المجسم 360°...", "قد يستغرق ذلك 15 إلى 35 ثانية")
+                updateStatus("جاري بناء المجسم السحابي 360°...", "قد يستغرق ذلك 20 إلى 40 ثانية")
 
                 val modelUrl = when {
                     spaceUrl.contains("triposr") -> {
@@ -323,14 +329,14 @@ class MainActivity : AppCompatActivity() {
                         val genRes = callGradioApi(spaceUrl, apiPrefix, "generate", genData, hfToken)
                         extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
                     }
-                    spaceUrl.contains("trellis") -> {
-                        val genData = JSONArray().put(fileObj)
-                        val genRes = callGradioApi(spaceUrl, apiPrefix, "image_to_3d", genData, hfToken)
+                    spaceUrl.contains("openlrm") -> {
+                        val genData = JSONArray().put(fileObj).put(false)
+                        val genRes = callGradioApi(spaceUrl, apiPrefix, "run", genData, hfToken)
                         extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
                     }
                     else -> {
                         val genData = JSONArray().put(fileObj)
-                        val genRes = callGradioApi(spaceUrl, apiPrefix, "generation_all", genData, hfToken)
+                        val genRes = callGradioApi(spaceUrl, apiPrefix, "run", genData, hfToken)
                         extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
                     }
                 }
@@ -346,7 +352,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val hint = if (hfToken.isEmpty()) " (أضف مفتاح HF Token من الأعلى لتفعيل خوادم السحابة)" else ""
+        val hint = if (hfToken.isEmpty()) " (أضف مفتاح HF Token من الأعلى)" else ""
         sendCloudFallback("تعذر الاتصال بالسحابة: $lastError$hint")
     }
 
