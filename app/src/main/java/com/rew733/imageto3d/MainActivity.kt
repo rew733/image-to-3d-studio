@@ -1,51 +1,40 @@
 package com.rew733.imageto3d
 
 import android.annotation.SuppressLint
-import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.util.Base64
 import android.view.View
-import android.webkit.ValueCallback
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import java.io.ByteArrayOutputStream
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
-    private var filePathCallback: ValueCallback<Array<Uri>>? = null
-    private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
+    private lateinit var pickMediaLauncher: ActivityResultLauncher<PickVisualMediaRequest>
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // إعداد ملتقط الصور والملفات الحديث المتوافق مع Android 14+
-        fileChooserLauncher = registerForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            val results: Array<Uri>? = if (result.resultCode == RESULT_OK && result.data != null) {
-                val dataString = result.data?.dataString
-                val clipData = result.data?.clipData
-                
-                if (clipData != null) {
-                    val count = clipData.itemCount
-                    Array(count) { i -> clipData.getItemAt(i).uri }
-                } else if (dataString != null) {
-                    arrayOf(Uri.parse(dataString))
-                } else {
-                    null
-                }
-            } else {
-                null
+        // ملتقط الصور الرسمي الحديث في Android 14
+        pickMediaLauncher = registerForActivityResult(
+            ActivityResultContracts.PickVisualMedia()
+        ) { uri: Uri? ->
+            if (uri != null) {
+                processAndSendImageToWebView(uri)
             }
-            filePathCallback?.onReceiveValue(results)
-            filePathCallback = null
         }
 
         webView = WebView(this).apply {
@@ -55,43 +44,19 @@ class MainActivity : AppCompatActivity() {
                 domStorageEnabled = true
                 allowFileAccess = true
                 allowContentAccess = true
-                databaseEnabled = true
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 useWideViewPort = true
                 loadWithOverviewMode = true
-                cacheMode = WebSettings.LOAD_DEFAULT
             }
 
-            webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                    return false
-                }
-            }
-
-            webChromeClient = object : WebChromeClient() {
-                override fun onShowFileChooser(
-                    webView: WebView?,
-                    filePathCallback: ValueCallback<Array<Uri>>?,
-                    fileChooserParams: FileChooserParams?
-                ): Boolean {
-                    this@MainActivity.filePathCallback?.onReceiveValue(null)
-                    this@MainActivity.filePathCallback = filePathCallback
-
-                    val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "image/*"
-                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
-                    }
-                    fileChooserLauncher.launch(Intent.createChooser(intent, "اختر صورة للتحويل إلى 3D"))
-                    return true
-                }
-            }
+            addJavascriptInterface(WebAppInterface(), "AndroidBridge")
+            webViewClient = WebViewClient()
+            webChromeClient = WebChromeClient()
         }
 
         setContentView(webView)
         webView.loadUrl("file:///android_asset/index.html")
 
-        // التحكم الذكي بزر الرجوع
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (webView.canGoBack()) {
@@ -101,6 +66,51 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    inner class WebAppInterface {
+        @JavascriptInterface
+        fun openGallery() {
+            runOnUiThread {
+                pickMediaLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            }
+        }
+    }
+
+    private fun processAndSendImageToWebView(uri: Uri) {
+        Thread {
+            try {
+                val inputStream = contentResolver.openInputStream(uri)
+                val originalBitmap = BitmapFactory.decodeStream(inputStream)
+                inputStream?.close()
+
+                if (originalBitmap != null) {
+                    // تحجيم ذكي للصورة (حد أقصى 1024 بكسل) لتسريع الرفع ومنع استهلاك الذاكرة
+                    val maxDim = 1024
+                    val scale = minOf(
+                        maxDim.toFloat() / originalBitmap.width,
+                        maxDim.toFloat() / originalBitmap.height,
+                        1.0f
+                    )
+                    val newWidth = (originalBitmap.width * scale).toInt()
+                    val newHeight = (originalBitmap.height * scale).toInt()
+                    val resizedBitmap = Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
+
+                    val outputStream = ByteArrayOutputStream()
+                    resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
+                    val base64String = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+                    val dataUrl = "data:image/jpeg;base64,$base64String"
+
+                    runOnUiThread {
+                        webView.evaluateJavascript("window.onImageSelectedFromAndroid('$dataUrl');", null)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
     }
 
     override fun onDestroy() {
