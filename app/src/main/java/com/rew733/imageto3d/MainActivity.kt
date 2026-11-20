@@ -31,7 +31,16 @@ class MainActivity : AppCompatActivity() {
         ) { result ->
             val results: Array<Uri>? = if (result.resultCode == RESULT_OK && result.data != null) {
                 val dataString = result.data?.dataString
-                if (dataString != null) arrayOf(Uri.parse(dataString)) else null
+                val clipData = result.data?.clipData
+                
+                if (clipData != null) {
+                    val count = clipData.itemCount
+                    Array(count) { i -> clipData.getItemAt(i).uri }
+                } else if (dataString != null) {
+                    arrayOf(Uri.parse(dataString))
+                } else {
+                    null
+                }
             } else {
                 null
             }
@@ -46,6 +55,7 @@ class MainActivity : AppCompatActivity() {
                 domStorageEnabled = true
                 allowFileAccess = true
                 allowContentAccess = true
+                databaseEnabled = true
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 useWideViewPort = true
                 loadWithOverviewMode = true
@@ -70,6 +80,7 @@ class MainActivity : AppCompatActivity() {
                     val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
                         addCategory(Intent.CATEGORY_OPENABLE)
                         type = "image/*"
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
                     }
                     fileChooserLauncher.launch(Intent.createChooser(intent, "اختر صورة للتحويل إلى 3D"))
                     return true
