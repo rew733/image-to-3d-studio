@@ -240,7 +240,7 @@
     <h1>استوديو التحويل إلى 3D</h1>
     <div class="header-actions">
         <button id="openTokenBtn" class="token-btn">🔑 HF Token</button>
-        <span class="badge">Pro Relief • v2.2</span>
+        <span class="badge">360° Dual • v2.3</span>
     </div>
 </header>
 
@@ -249,7 +249,7 @@
 
     <div class="placeholder" id="placeholderBox">
         <div class="placeholder-icon">🧍‍♂️</div>
-        <p>اختر صورة؛ يعرضها <b>المجسم الفوري</b> بنحت بارز متقن يحافظ على الملامح، أو استخدم <b>سحابي 360°</b> مع مفتاح HF Token لتوليد مجسم كامل من الخلف والجانبين.</p>
+        <p>اختر صورة؛ يقوم المحرك ببناء <b>مجسم 360° متكامل من الأمام والخلف</b> مع توليد نسيج الظهر وتنعيم الحواف.</p>
     </div>
 
     <model-viewer id="modelViewer"
@@ -265,17 +265,17 @@
     <div class="depth-slider-box" id="depthControlBox">
         <div class="slider-row">
             <div class="depth-header">
-                <span>عمق النحت البارز (Bas-Relief Depth)</span>
-                <span id="depthVal">45%</span>
+                <span>عمق وسُمك المجسم (3D Relief Depth)</span>
+                <span id="depthVal">50%</span>
             </div>
-            <input type="range" id="depthRange" min="0" max="100" value="45">
+            <input type="range" id="depthRange" min="0" max="100" value="50">
         </div>
         <div class="slider-row">
             <div class="depth-header">
                 <span>تنظيف وقص الحواف (Edge Trim)</span>
-                <span id="trimVal">40%</span>
+                <span id="trimVal">45%</span>
             </div>
-            <input type="range" id="trimRange" min="10" max="95" value="40">
+            <input type="range" id="trimRange" min="10" max="95" value="45">
         </div>
     </div>
 
@@ -289,7 +289,7 @@
 <div class="controls">
     <div class="preview-bar" id="previewBar">
         <img id="thumbImg" src="" alt="صورة معزولة">
-        <div class="preview-info">جاهز — حرّك بإصبعك لمعاينة البروز</div>
+        <div class="preview-info">جاهز — اسحب 360° لمعاينة الأمام والخلف</div>
         <button id="toggleIsolateBtn" class="isolate-toggle">عزل تلقائي: مفعّل</button>
     </div>
 
@@ -299,11 +299,11 @@
         </button>
 
         <button id="instantBtn" class="btn btn-instant" disabled>
-            ⚡ مجسم فوري
+            ⚡ مجسم 360° فوري
         </button>
 
         <button id="cloudBtn" class="btn btn-primary" disabled>
-            ☁️ سحابي 360°
+            ☁️ سحابي
         </button>
     </div>
 </div>
@@ -311,7 +311,7 @@
 <div class="modal-backdrop" id="tokenModal">
     <div class="modal-card">
         <h3>🔑 مفتاح Hugging Face السحابي</h3>
-        <p>للحصول على مجسم 360° حقيقي من الأمام والخلف والجانبين، الصق رمز حسابك المجاني من huggingface.co/settings/tokens:</p>
+        <p>الصق رمز حسابك المجاني (hf_...) لتشغيل خوادم التوليد السحابية:</p>
         <input type="password" id="hfTokenInput" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx">
         <div class="btn-row">
             <button id="saveTokenBtn" class="btn btn-primary">حفظ المفتاح</button>
@@ -348,9 +348,9 @@
 
     let currentDataUrl = null;
     let autoIsolate = true;
-    let scene, camera, renderer, reliefMesh, reliefMat;
+    let scene, camera, renderer, bodyGroup, frontMat, backMat;
     let isDragging = false, prevX = 0, prevY = 0;
-    let targetRotX = 0, targetRotY = 0;
+    let rotX = 0, rotY = 0, autoSpin = true;
 
     function showToast(msg) {
         toastBanner.textContent = msg;
@@ -395,33 +395,54 @@
         previewBar.style.display = 'flex';
         instantBtn.disabled = false;
         cloudBtn.disabled = false;
-        buildCleanBasRelief(dataUrl);
+        autoSpin = true;
+        buildFull360Relief(dataUrl);
     };
 
-    // خريطة نحت بارز دقيقة ومتزنة تحافظ على ملامح الوجه والجسم دون أي تمدد أو انفصال
-    function createBasReliefTextures(img, trimThreshold) {
+    // توليد خريطة الوجه الأمامي، وخريطة الظهر المُنعّمة (بدون ملامح وجه مكررة في الظهر)، وخريطة العمق
+    function createDualSideTextures(img, trimThreshold) {
         const w = 220;
         const h = Math.round((img.height / img.width) * 220);
 
-        const colorCanvas = document.createElement('canvas');
-        colorCanvas.width = img.width;
-        colorCanvas.height = img.height;
-        const cCtx = colorCanvas.getContext('2d');
-        cCtx.drawImage(img, 0, 0);
-        const cData = cCtx.getImageData(0, 0, img.width, img.height);
-        const p = cData.data;
+        // 1. نسيج الوجه الأمامي النظيف
+        const frontCanvas = document.createElement('canvas');
+        frontCanvas.width = img.width;
+        frontCanvas.height = img.height;
+        const fCtx = frontCanvas.getContext('2d');
+        fCtx.drawImage(img, 0, 0);
+        const fData = fCtx.getImageData(0, 0, img.width, img.height);
+        const p = fData.data;
 
         const minAlpha = Math.round((trimThreshold / 100) * 255);
         for (let i = 0; i < p.length; i += 4) {
             if (p[i + 3] < minAlpha) p[i + 3] = 0;
         }
-        cCtx.putImageData(cData, 0, 0);
+        fCtx.putImageData(fData, 0, 0);
 
+        // 2. نسيج الظهر التقديري (تجانس لوني للعضلات والملابس والشعر دون نسخ ملامح الوجه في الخلف)
+        const backCanvas = document.createElement('canvas');
+        backCanvas.width = img.width;
+        backCanvas.height = img.height;
+        const bCtx = backCanvas.getContext('2d');
+        // تمويه قوي للألوان الداخلية مع الإبقاء على حدود الشفافية الحادة للجسم
+        bCtx.filter = 'blur(18px) brightness(0.88) contrast(0.92)';
+        bCtx.drawImage(frontCanvas, 0, 0);
+        bCtx.filter = 'none';
+
+        const bImgData = bCtx.getImageData(0, 0, img.width, img.height);
+        const bp = bImgData.data;
+        for (let i = 0; i < bp.length; i += 4) {
+            // قفل حدود الظهر لتطابق حدود الوجه الأمامي بدقة البكسل الواحد
+            bp[i + 3] = p[i + 3];
+        }
+        bCtx.putImageData(bImgData, 0, 0);
+
+        // 3. خريطة العمق العضوية الموحدة للغلافين
         const smallCanvas = document.createElement('canvas');
         smallCanvas.width = w;
         smallCanvas.height = h;
         const sCtx = smallCanvas.getContext('2d');
-        sCtx.drawImage(colorCanvas, 0, 0, w, h);
+        sCtx.drawImage(frontCanvas, 0, 0, w, h);
         const sData = sCtx.getImageData(0, 0, w, h).data;
 
         const dist = new Float32Array(w * h);
@@ -480,7 +501,7 @@
         const dImg = dCtx.createImageData(w, h);
         const dp = dImg.data;
 
-        const smoothRadius = 16.0;
+        const smoothRadius = 15.0;
 
         for (let i = 0; i < w * h; i++) {
             if (alphaMask[i] === 0 || dist[i] <= 1.0) {
@@ -491,8 +512,8 @@
             } else {
                 const norm = Math.min(1, (dist[i] - 1.0) / smoothRadius);
                 const dome = Math.sin(norm * (Math.PI / 2));
-                const detail = lumArr[i] * 0.25 * dome;
-                const val = Math.min(255, Math.round((dome * 0.75 + detail) * 255));
+                const detail = lumArr[i] * 0.22 * dome;
+                const val = Math.min(255, Math.round((dome * 0.78 + detail) * 255));
                 dp[i * 4] = val;
                 dp[i * 4 + 1] = val;
                 dp[i * 4 + 2] = val;
@@ -508,15 +529,17 @@
         sdCtx.filter = 'blur(2px)';
         sdCtx.drawImage(depthCanvas, 0, 0);
 
-        const cleanColorTex = new THREE.CanvasTexture(colorCanvas);
-        cleanColorTex.needsUpdate = true;
+        const frontTex = new THREE.CanvasTexture(frontCanvas);
+        frontTex.needsUpdate = true;
+        const backTex = new THREE.CanvasTexture(backCanvas);
+        backTex.needsUpdate = true;
         const depthTex = new THREE.CanvasTexture(smoothDepthCanvas);
         depthTex.needsUpdate = true;
 
-        return { cleanColorTex, depthTex };
+        return { frontTex, backTex, depthTex };
     }
 
-    function buildCleanBasRelief(dataUrl) {
+    function buildFull360Relief(dataUrl) {
         placeholderBox.style.display = 'none';
         modelViewer.style.display = 'none';
         local3dContainer.style.display = 'block';
@@ -536,12 +559,12 @@
         local3dContainer.appendChild(renderer.domElement);
 
         scene.add(new THREE.AmbientLight(0xffffff, 0.78));
-        const keyLight = new THREE.DirectionalLight(0xffffff, 0.65);
-        keyLight.position.set(1.8, 2.5, 4);
+        const keyLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        keyLight.position.set(2, 3, 4);
         scene.add(keyLight);
-        const rimLight = new THREE.DirectionalLight(0x93c5fd, 0.35);
-        rimLight.position.set(-2, 1, 2);
-        scene.add(rimLight);
+        const backLight = new THREE.DirectionalLight(0x93c5fd, 0.65);
+        backLight.position.set(-2, 2, -4);
+        scene.add(backLight);
 
         const img = new Image();
         img.onload = function() {
@@ -550,38 +573,51 @@
             const planeH = aspect >= 1 ? 1.85 / aspect : 1.85;
 
             const trimValNum = parseInt(trimRange.value, 10);
-            const { cleanColorTex, depthTex } = createBasReliefTextures(img, trimValNum);
-            // عمق متزن يمنع تشويه الملامح أو تمدد الحواف
-            const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.28;
+            const { frontTex, backTex, depthTex } = createDualSideTextures(img, trimValNum);
+            const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.30;
 
             const geometry = new THREE.PlaneGeometry(planeW, planeH, 220, 220);
 
-            reliefMat = new THREE.MeshStandardMaterial({
-                map: cleanColorTex,
+            // الغلاف الأمامي (الوجه والصدر والقفازات)
+            frontMat = new THREE.MeshStandardMaterial({
+                map: frontTex,
                 displacementMap: depthTex,
                 displacementScale: scaleVal,
                 transparent: true,
                 alphaTest: 0.5,
-                roughness: 0.55,
-                metalness: 0.05,
-                side: THREE.DoubleSide
+                roughness: 0.52,
+                metalness: 0.06,
+                side: THREE.FrontSide
             });
 
-            reliefMesh = new THREE.Mesh(geometry, reliefMat);
-            scene.add(reliefMesh);
-            targetRotX = 0;
-            targetRotY = 0;
+            // الغلاف الخلفي (ظهر الجسم والشعر والملابس بلون متجانس دون ملامح وجه)
+            backMat = new THREE.MeshStandardMaterial({
+                map: backTex,
+                displacementMap: depthTex,
+                displacementScale: -scaleVal,
+                transparent: true,
+                alphaTest: 0.5,
+                roughness: 0.68,
+                metalness: 0.04,
+                side: THREE.BackSide
+            });
+
+            bodyGroup = new THREE.Group();
+            bodyGroup.add(new THREE.Mesh(geometry, frontMat));
+            bodyGroup.add(new THREE.Mesh(geometry, backMat));
+            scene.add(bodyGroup);
+
+            rotX = 0;
+            rotY = 0;
 
             function animate() {
                 requestAnimationFrame(animate);
-                if (reliefMesh) {
-                    if (!isDragging) {
-                        // حركة عرض مجسمة انسيابية ضمن زاوية تحافظ على جمال الوجه والجسم (±28 درجة)
-                        targetRotY = Math.sin(Date.now() * 0.0016) * 0.48;
-                        targetRotX = Math.cos(Date.now() * 0.0011) * 0.08;
+                if (bodyGroup) {
+                    if (!isDragging && autoSpin) {
+                        rotY += 0.012;
                     }
-                    reliefMesh.rotation.y += (targetRotY - reliefMesh.rotation.y) * 0.1;
-                    reliefMesh.rotation.x += (targetRotX - reliefMesh.rotation.x) * 0.1;
+                    bodyGroup.rotation.y += (rotY - bodyGroup.rotation.y) * 0.15;
+                    bodyGroup.rotation.x += (rotX - bodyGroup.rotation.x) * 0.15;
                 }
                 renderer.render(scene, camera);
             }
@@ -592,16 +628,16 @@
         const dom = renderer.domElement;
         dom.addEventListener('touchstart', (e) => {
             isDragging = true;
+            autoSpin = false;
             prevX = e.touches[0].clientX;
             prevY = e.touches[0].clientY;
         });
         dom.addEventListener('touchmove', (e) => {
-            if (!isDragging || !reliefMesh) return;
+            if (!isDragging || !bodyGroup) return;
             const dx = e.touches[0].clientX - prevX;
             const dy = e.touches[0].clientY - prevY;
-            // تقييد زاوية الالتفاف التفاعلية للحفاظ على وضوح النحت دون انقلاب
-            targetRotY = Math.max(-0.85, Math.min(0.85, targetRotY + dx * 0.01));
-            targetRotX = Math.max(-0.45, Math.min(0.45, targetRotX + dy * 0.01));
+            rotY += dx * 0.014;
+            rotX = Math.max(-0.6, Math.min(0.6, rotX + dy * 0.012));
             prevX = e.touches[0].clientX;
             prevY = e.touches[0].clientY;
         });
@@ -611,9 +647,9 @@
     depthRange.addEventListener('input', (e) => {
         const val = e.target.value;
         depthVal.textContent = val + '%';
-        if (reliefMat) {
-            reliefMat.displacementScale = (val / 100) * 0.28;
-        }
+        const s = (val / 100) * 0.30;
+        if (frontMat) frontMat.displacementScale = s;
+        if (backMat) backMat.displacementScale = -s;
     });
 
     trimRange.addEventListener('input', (e) => {
@@ -621,12 +657,13 @@
     });
 
     trimRange.addEventListener('change', () => {
-        if (currentDataUrl) buildCleanBasRelief(currentDataUrl);
+        if (currentDataUrl) buildFull360Relief(currentDataUrl);
     });
 
     instantBtn.addEventListener('click', () => {
         if (!currentDataUrl) return;
-        buildCleanBasRelief(currentDataUrl);
+        autoSpin = true;
+        buildFull360Relief(currentDataUrl);
     });
 
     cloudBtn.addEventListener('click', () => {
@@ -659,7 +696,7 @@
         instantBtn.disabled = false;
         cloudBtn.disabled = false;
         if (currentDataUrl) {
-            buildCleanBasRelief(currentDataUrl);
+            buildFull360Relief(currentDataUrl);
             showToast(reason);
         }
     };
