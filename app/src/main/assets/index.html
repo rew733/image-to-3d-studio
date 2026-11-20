@@ -34,13 +34,13 @@
             align-items: center;
             gap: 8px;
         }
-        header h1 { font-size: 1rem; font-weight: 700; color: #fff; }
-        .header-actions { display: flex; align-items: center; gap: 8px; }
+        header h1 { font-size: 0.98rem; font-weight: 700; color: #fff; }
+        .header-actions { display: flex; align-items: center; gap: 6px; }
         .badge {
-            font-size: 0.7rem;
+            font-size: 0.68rem;
             background: rgba(16, 185, 129, 0.15);
             color: #34d399;
-            padding: 4px 9px;
+            padding: 4px 8px;
             border-radius: 99px;
             border: 1px solid rgba(16, 185, 129, 0.35);
         }
@@ -49,8 +49,8 @@
             color: #fbbf24;
             border: 1px solid #374151;
             border-radius: 8px;
-            padding: 5px 10px;
-            font-size: 0.75rem;
+            padding: 5px 9px;
+            font-size: 0.72rem;
             font-weight: 600;
             cursor: pointer;
         }
@@ -80,7 +80,7 @@
             bottom: 12px;
             left: 14px;
             right: 14px;
-            background: rgba(24, 27, 34, 0.9);
+            background: rgba(24, 27, 34, 0.92);
             backdrop-filter: blur(8px);
             border: 1px solid var(--border);
             border-radius: 12px;
@@ -154,9 +154,9 @@
         .preview-bar {
             display: none;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
             background: #12151b;
-            padding: 7px 12px;
+            padding: 7px 10px;
             border-radius: 10px;
             border: 1px solid var(--border);
         }
@@ -168,7 +168,17 @@
             border-radius: 8px;
             border: 1px solid #374151;
         }
-        .preview-info { flex: 1; font-size: 0.82rem; color: #e5e7eb; font-weight: 500; }
+        .preview-info { flex: 1; font-size: 0.8rem; color: #e5e7eb; }
+        .isolate-toggle {
+            background: #1e293b;
+            color: #38bdf8;
+            border: 1px solid #0284c7;
+            padding: 5px 9px;
+            border-radius: 8px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
         .btn-row { display: flex; gap: 8px; }
         .btn {
             flex: 1;
@@ -189,7 +199,6 @@
         .btn-secondary { background: #262b36; color: #fff; border: 1px solid var(--border); }
         .btn:disabled { opacity: 0.45; pointer-events: none; }
 
-        /* نافذة إدخال HF Token */
         .modal-backdrop {
             position: fixed;
             inset: 0;
@@ -231,7 +240,7 @@
     <h1>استوديو التحويل إلى 3D</h1>
     <div class="header-actions">
         <button id="openTokenBtn" class="token-btn">🔑 HF Token</button>
-        <span class="badge">Solid 3D • v1.7</span>
+        <span class="badge">Solid 3D • v1.8</span>
     </div>
 </header>
 
@@ -240,7 +249,7 @@
 
     <div class="placeholder" id="placeholderBox">
         <div class="placeholder-icon">🧍‍♂️</div>
-        <p>اختر صورة شخص أو مقاتل؛ سيقوم التطبيق <b>بعزل الجسم بدقة عالية</b> وبناء مجسم ثلاثي الأبعاد بسُمك حقيقي.</p>
+        <p>اختر صورة عادية أو صورة مفرّغة الخلفية؛ سيتعرف التطبيق عليها تلقائياً ويبني مجسماً ثلاثي الأبعاد ناعماً وواضح التفاصيل.</p>
     </div>
 
     <model-viewer id="modelViewer"
@@ -257,16 +266,16 @@
         <div class="slider-row">
             <div class="depth-header">
                 <span>سُمك وتجسيم الجسم (Solid Relief)</span>
-                <span id="depthVal">40%</span>
+                <span id="depthVal">30%</span>
             </div>
-            <input type="range" id="depthRange" min="0" max="100" value="40">
+            <input type="range" id="depthRange" min="0" max="100" value="30">
         </div>
         <div class="slider-row">
             <div class="depth-header">
                 <span>تنظيف وقص الحواف (Edge Trim)</span>
-                <span id="trimVal">65%</span>
+                <span id="trimVal">45%</span>
             </div>
-            <input type="range" id="trimRange" min="15" max="98" value="65">
+            <input type="range" id="trimRange" min="10" max="95" value="45">
         </div>
     </div>
 
@@ -280,7 +289,8 @@
 <div class="controls">
     <div class="preview-bar" id="previewBar">
         <img id="thumbImg" src="" alt="صورة معزولة">
-        <div class="preview-info">تم عزل الجسم بدقة — اسحب لتدوير المجسم 360°</div>
+        <div class="preview-info">جاهز — اسحب لتدوير المجسم</div>
+        <button id="toggleIsolateBtn" class="isolate-toggle">عزل تلقائي: مفعّل</button>
     </div>
 
     <div class="btn-row">
@@ -298,7 +308,6 @@
     </div>
 </div>
 
-<!-- نافذة حفظ HF Token -->
 <div class="modal-backdrop" id="tokenModal">
     <div class="modal-card">
         <h3>🔑 مفتاح Hugging Face السحابي</h3>
@@ -317,6 +326,7 @@
     const cloudBtn = document.getElementById('cloudBtn');
     const previewBar = document.getElementById('previewBar');
     const thumbImg = document.getElementById('thumbImg');
+    const toggleIsolateBtn = document.getElementById('toggleIsolateBtn');
     const loaderOverlay = document.getElementById('loaderOverlay');
     const statusTitle = document.getElementById('statusTitle');
     const statusSub = document.getElementById('statusSub');
@@ -337,6 +347,7 @@
     const closeTokenBtn = document.getElementById('closeTokenBtn');
 
     let currentDataUrl = null;
+    let autoIsolate = true;
     let scene, camera, renderer, bodyGroup, frontMat, backMat;
     let isDragging = false, prevX = 0, prevY = 0;
 
@@ -346,7 +357,14 @@
         setTimeout(() => { toastBanner.style.display = 'none'; }, 6000);
     }
 
-    // إدارة نافذة HF Token
+    toggleIsolateBtn.addEventListener('click', () => {
+        autoIsolate = !autoIsolate;
+        toggleIsolateBtn.textContent = autoIsolate ? "عزل تلقائي: مفعّل" : "عزل تلقائي: متوقف";
+        if (window.AndroidBridge && window.AndroidBridge.setAutoIsolate) {
+            window.AndroidBridge.setAutoIsolate(autoIsolate);
+        }
+    });
+
     openTokenBtn.addEventListener('click', () => {
         if (window.AndroidBridge && window.AndroidBridge.getHfToken) {
             hfTokenInput.value = window.AndroidBridge.getHfToken();
@@ -354,9 +372,7 @@
         tokenModal.style.display = 'flex';
     });
 
-    closeTokenBtn.addEventListener('click', () => {
-        tokenModal.style.display = 'none';
-    });
+    closeTokenBtn.addEventListener('click', () => { tokenModal.style.display = 'none'; });
 
     saveTokenBtn.addEventListener('click', () => {
         if (window.AndroidBridge && window.AndroidBridge.saveHfToken) {
@@ -381,12 +397,11 @@
         buildSolidIsolated3DMesh(dataUrl);
     };
 
-    // توليد خريطة عمق ناعمة للجسم مع فلتر تضييق الحواف لإزالة أي بقايا خلفية
+    // توليد خريطة عمق ناعمة ومتدرجة عند الحواف لمنع التمطط الحاد
     function createCleanBodyTextures(img, trimThreshold) {
-        const w = 280;
-        const h = Math.round((img.height / img.width) * 280);
+        const w = 260;
+        const h = Math.round((img.height / img.width) * 260);
 
-        // 1. نسيج اللون المنظف من الحواف الضبابية
         const colorCanvas = document.createElement('canvas');
         colorCanvas.width = img.width;
         colorCanvas.height = img.height;
@@ -403,12 +418,15 @@
         }
         cCtx.putImageData(cData, 0, 0);
 
-        // 2. نسيج العمق العضوي الناعم
+        // رسم خريطة العمق على خلفية سوداء مع تنعيم كبير لتفادي الجدران الحادة
         const depthCanvas = document.createElement('canvas');
         depthCanvas.width = w;
         depthCanvas.height = h;
         const dCtx = depthCanvas.getContext('2d');
-        dCtx.filter = 'blur(3px)';
+        dCtx.fillStyle = '#000000';
+        dCtx.fillRect(0, 0, w, h);
+
+        dCtx.filter = 'blur(6px)';
         dCtx.drawImage(colorCanvas, 0, 0, w, h);
         dCtx.filter = 'none';
 
@@ -416,13 +434,14 @@
         const dp = dData.data;
 
         for (let i = 0; i < dp.length; i += 4) {
-            if (dp[i + 3] < 80) {
-                dp[i] = 0; dp[i + 1] = 0; dp[i + 2] = 0; dp[i + 3] = 255;
-            } else {
-                const lum = (0.299 * dp[i] + 0.587 * dp[i + 1] + 0.114 * dp[i + 2]);
-                const depth = Math.min(255, Math.round(125 + (lum * 0.5)));
-                dp[i] = depth; dp[i + 1] = depth; dp[i + 2] = depth; dp[i + 3] = 255;
-            }
+            const alphaFactor = dp[i + 3] / 255;
+            const lum = (0.299 * dp[i] + 0.587 * dp[i + 1] + 0.114 * dp[i + 2]);
+            // تدرج ناعم مرتبط بالشفافية لمنع القفزات الحادة عند الأطراف
+            const depth = Math.min(255, Math.round(alphaFactor * (90 + lum * 0.65)));
+            dp[i] = depth;
+            dp[i + 1] = depth;
+            dp[i + 2] = depth;
+            dp[i + 3] = 255;
         }
         dCtx.putImageData(dData, 0, 0);
 
@@ -446,69 +465,62 @@
 
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-        camera.position.z = 2.5;
+        camera.position.z = 2.45;
 
         renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(width, height);
         renderer.setPixelRatio(window.devicePixelRatio);
         local3dContainer.appendChild(renderer.domElement);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.85));
-        const keyLight = new THREE.DirectionalLight(0xffffff, 0.65);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.92));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 0.55);
         keyLight.position.set(2, 3, 4);
         scene.add(keyLight);
-        const rimLight = new THREE.DirectionalLight(0x60a5fa, 0.45);
-        rimLight.position.set(-2, 1, -3);
-        scene.add(rimLight);
 
         const img = new Image();
         img.onload = function() {
             const aspect = img.width / img.height;
-            const planeW = aspect >= 1 ? 1.9 : 1.9 * aspect;
-            const planeH = aspect >= 1 ? 1.9 / aspect : 1.9;
+            const planeW = aspect >= 1 ? 1.85 : 1.85 * aspect;
+            const planeH = aspect >= 1 ? 1.85 / aspect : 1.85;
 
             const trimValNum = parseInt(trimRange.value, 10);
             const { cleanColorTex, depthTex } = createCleanBodyTextures(img, trimValNum);
-            const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.85;
+            const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.55;
 
-            const geometry = new THREE.PlaneGeometry(planeW, planeH, 180, 180);
+            const geometry = new THREE.PlaneGeometry(planeW, planeH, 160, 160);
 
-            // الوجه الأمامي للجسم
             frontMat = new THREE.MeshStandardMaterial({
                 map: cleanColorTex,
                 displacementMap: depthTex,
                 displacementScale: scaleVal,
                 transparent: true,
-                alphaTest: 0.5,
-                roughness: 0.6,
-                metalness: 0.1,
+                alphaTest: 0.45,
+                roughness: 0.65,
+                metalness: 0.05,
                 side: THREE.FrontSide
             });
 
-            // الوجه الخلفي المتناظر لإعطاء الجسم سُمكاً مغلقاً عند التدوير 360°
             backMat = new THREE.MeshStandardMaterial({
                 map: cleanColorTex,
                 color: 0x9ca3af,
                 displacementMap: depthTex,
                 displacementScale: -scaleVal,
                 transparent: true,
-                alphaTest: 0.5,
-                roughness: 0.8,
+                alphaTest: 0.45,
+                roughness: 0.85,
                 metalness: 0.05,
                 side: THREE.BackSide
             });
 
             bodyGroup = new THREE.Group();
-            const frontMesh = new THREE.Mesh(geometry, frontMat);
-            const backMesh = new THREE.Mesh(geometry, backMat);
-            bodyGroup.add(frontMesh);
-            bodyGroup.add(backMesh);
+            bodyGroup.add(new THREE.Mesh(geometry, frontMat));
+            bodyGroup.add(new THREE.Mesh(geometry, backMat));
             scene.add(bodyGroup);
 
             function animate() {
                 requestAnimationFrame(animate);
                 if (!isDragging && bodyGroup) {
-                    bodyGroup.rotation.y = Math.sin(Date.now() * 0.0014) * 0.45;
+                    bodyGroup.rotation.y = Math.sin(Date.now() * 0.0014) * 0.42;
                 }
                 renderer.render(scene, camera);
             }
@@ -537,7 +549,7 @@
     depthRange.addEventListener('input', (e) => {
         const val = e.target.value;
         depthVal.textContent = val + '%';
-        const s = (val / 100) * 0.85;
+        const s = (val / 100) * 0.55;
         if (frontMat) frontMat.displacementScale = s;
         if (backMat) backMat.displacementScale = -s;
     });
