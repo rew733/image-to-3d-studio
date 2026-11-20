@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Image to 3D Studio</title>
-    <!-- مكتبة Google Model Viewer المدعومة بـ Three.js لعرض مجسمات GLB بسلاسة فائقة -->
     <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
     <style>
         :root {
@@ -114,12 +113,13 @@
             border: 1px solid var(--border);
         }
         .preview-bar img {
-            width: 44px;
-            height: 44px;
+            width: 48px;
+            height: 48px;
             object-fit: cover;
             border-radius: 8px;
+            border: 1px solid #374151;
         }
-        .preview-info { flex: 1; font-size: 0.82rem; color: var(--muted); word-break: break-all; }
+        .preview-info { flex: 1; font-size: 0.85rem; color: #e5e7eb; font-weight: 500; }
         .btn-row { display: flex; gap: 10px; }
         .btn {
             flex: 1;
@@ -137,16 +137,15 @@
         }
         .btn-primary { background: var(--accent); color: #fff; }
         .btn-primary:active { background: var(--accent-hover); transform: scale(0.98); }
-        .btn-secondary { background: #262b36; color: #fff; border: 1px solid var(--border); text-align: center; }
-        .btn:disabled { opacity: 0.5; pointer-events: none; }
-        input[type="file"] { display: none; }
+        .btn-secondary { background: #262b36; color: #fff; border: 1px solid var(--border); }
+        .btn:disabled { opacity: 0.45; pointer-events: none; }
     </style>
 </head>
 <body>
 
 <header>
     <h1>استوديو التحويل إلى 3D</h1>
-    <span class="badge">Cloud AI • v1.1</span>
+    <span class="badge">Cloud AI • v1.2</span>
 </header>
 
 <div class="viewer-container">
@@ -174,14 +173,13 @@
 <div class="controls">
     <div class="preview-bar" id="previewBar">
         <img id="thumbImg" src="" alt="صورة مختارة">
-        <div class="preview-info" id="fileNameText">تم اختيار الصورة بنجاح</div>
+        <div class="preview-info" id="fileNameText">تم تحميل الصورة بنجاح وجاهزة للتحويل</div>
     </div>
 
     <div class="btn-row">
-        <button class="btn btn-secondary" onclick="document.getElementById('imageInput').click()">
+        <button id="pickBtn" class="btn btn-secondary">
             📷 اختر صورة
         </button>
-        <input type="file" id="imageInput" accept="image/*">
 
         <button id="convertBtn" class="btn btn-primary" disabled>
             ✨ تحويل إلى 3D
@@ -189,64 +187,65 @@
     </div>
 </div>
 
-<script type="module">
-    import { Client, handle_file } from "https://cdn.jsdelivr.net/npm/@gradio/client@1.4.2/+esm";
-
-    const imageInput = document.getElementById('imageInput');
+<script>
+    const pickBtn = document.getElementById('pickBtn');
     const convertBtn = document.getElementById('convertBtn');
     const previewBar = document.getElementById('previewBar');
     const thumbImg = document.getElementById('thumbImg');
-    const fileNameText = document.getElementById('fileNameText');
     const loaderOverlay = document.getElementById('loaderOverlay');
     const statusTitle = document.getElementById('statusTitle');
     const statusSub = document.getElementById('statusSub');
     const placeholderBox = document.getElementById('placeholderBox');
     const modelViewer = document.getElementById('modelViewer');
 
-    let selectedBlob = null;
-    let selectedFileName = "";
+    let currentDataUrl = null;
 
-    // معالجة اختيار الصورة
-    imageInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        selectedFileName = file.name;
-        
-        // استخدام FileReader لقراءة الصورة كـ Base64 لضمان عرضها بأمان داخل WebView
-        const reader = new FileReader();
-        reader.onload = function(event) {
-            thumbImg.src = event.target.result;
-            previewBar.style.display = 'flex';
-            convertBtn.disabled = false;
-            
-            // تحويل الملف لـ Blob لإرساله للخادم لاحقاً
-            selectedBlob = file;
-        };
-        reader.onerror = function() {
-            alert("فشل قراءة ملف الصورة المختارة.");
-        };
-        reader.readAsDataURL(file);
+    // استدعاء معرض الصور عبر الجسر الأصلي للأندرويد
+    pickBtn.addEventListener('click', () => {
+        if (window.AndroidBridge && window.AndroidBridge.openGallery) {
+            window.AndroidBridge.openGallery();
+        } else {
+            alert("جسر النظام غير متوفر.");
+        }
     });
 
-    // إرسال الصورة للسحابة
+    // الدالة التي يستدعيها كوتلن فور تجهيز الصورة
+    window.onImageSelectedFromAndroid = function(dataUrl) {
+        currentDataUrl = dataUrl;
+        thumbImg.src = dataUrl;
+        previewBar.style.display = 'flex';
+        convertBtn.disabled = false;
+    };
+
+    // تحويل DataURL إلى Blob لإرساله للسحابة
+    async function dataUrlToBlob(dataUrl) {
+        const res = await fetch(dataUrl);
+        return await res.blob();
+    }
+
+    // إرسال الصورة للسحابة عند الضغط على زر التحويل
     convertBtn.addEventListener('click', async () => {
-        if (!selectedBlob) return;
+        if (!currentDataUrl) return;
 
         loaderOverlay.style.display = 'flex';
         convertBtn.disabled = true;
-        statusTitle.textContent = "جاري الاتصال بخادم الذكاء الاصطناعي...";
-        statusSub.textContent = "يرجى الانتظار بضع ثوانٍ لمعالجة الصورة سحابياً";
+        statusTitle.textContent = "جاري تحميل محرك الاتصال السحابي...";
+        statusSub.textContent = "يتم تجهيز الاتصال مع خادم الذكاء الاصطناعي";
 
         try {
-            // الاتصال بنموذج TripoSR المفتوح على Hugging Face
+            // استيراد ديناميكي لا يعطل عمل الصفحة أبداً
+            const { Client, handle_file } = await import("https://cdn.jsdelivr.net/npm/@gradio/client@1.4.2/+esm");
+
+            statusTitle.textContent = "جاري الاتصال بخادم TripoSR...";
+            statusSub.textContent = "يرجى الانتظار بضع ثوانٍ لمعالجة الصورة";
+
+            const imageBlob = await dataUrlToBlob(currentDataUrl);
             const client = await Client.connect("stabilityai/TripoSR");
 
-            statusTitle.textContent = "جاري إزالة الخلفية وبناء المجسم...";
+            statusTitle.textContent = "جاري عزل العنصر وبناء المجسم...";
             statusSub.textContent = "توليد الشبكة الثلاثية الأبعاد (3D Mesh)";
 
-            // خطوة تجهيز الصورة (إزالة الخلفية)
-            const fileObj = handle_file(selectedBlob);
+            const fileObj = handle_file(imageBlob);
             const prepResult = await client.predict("/preprocess", {
                 input_image: fileObj,
                 do_remove_background: true,
@@ -258,13 +257,11 @@
             statusTitle.textContent = "جاري استخراج المجسم النهائي...";
             statusSub.textContent = "تحويل النموذج إلى صيغة GLB تفاعلية";
 
-            // خطوة توليد المجسم ثلاثي الأبعاد
             const genResult = await client.predict("/generate", {
                 image: processedImage,
                 mc_resolution: 256
             });
 
-            // استخراج رابط ملف GLB الناتج
             const modelData = genResult.data[0];
             const modelUrl = typeof modelData === 'string' ? modelData : modelData?.url;
 
@@ -272,14 +269,13 @@
                 throw new Error("لم يتم استلام رابط المجسم من الخادم.");
             }
 
-            // عرض المجسم في العارض التفاعلي
             placeholderBox.style.display = 'none';
             modelViewer.src = modelUrl;
             modelViewer.style.display = 'block';
 
         } catch (err) {
             console.error(err);
-            alert("حدث خطأ أثناء معالجة الصورة أو أن الخادم السحابي مشغول حالياً. يرجى المحاولة لاحقاً.\nتفاصيل: " + (err.message || err));
+            alert("تعذر إتمام العملية سحابياً حالياً (قد يكون الخادم المجاني مزدحماً):\n" + (err.message || err));
         } finally {
             loaderOverlay.style.display = 'none';
             convertBtn.disabled = false;
