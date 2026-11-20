@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Image to 3D Studio</title>
     <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         :root {
             --bg: #0f1115;
@@ -50,25 +51,57 @@
             justify-content: center;
             overflow: hidden;
         }
-        model-viewer {
+        model-viewer, #local3dContainer {
             width: 100%;
             height: 100%;
-            --poster-color: transparent;
+            display: none;
         }
         .placeholder {
             text-align: center;
             padding: 24px;
             max-width: 320px;
         }
-        .placeholder-icon {
-            font-size: 3rem;
-            margin-bottom: 12px;
-            opacity: 0.8;
+        .placeholder-icon { font-size: 3rem; margin-bottom: 12px; opacity: 0.85; }
+        .placeholder p { color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+        .depth-slider-box {
+            position: absolute;
+            bottom: 14px;
+            left: 16px;
+            right: 16px;
+            background: rgba(24, 27, 34, 0.88);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 10px 14px;
+            display: none;
+            flex-direction: column;
+            gap: 6px;
+            z-index: 10;
         }
-        .placeholder p {
-            color: var(--muted);
-            font-size: 0.9rem;
-            line-height: 1.5;
+        .depth-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            color: #d1d5db;
+        }
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--accent);
+        }
+        .toast-banner {
+            position: absolute;
+            top: 12px;
+            left: 14px;
+            right: 14px;
+            background: rgba(30, 41, 59, 0.95);
+            border: 1px solid #3b82f6;
+            color: #e2e8f0;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 0.8rem;
+            display: none;
+            z-index: 15;
+            text-align: center;
         }
         .loader-overlay {
             position: absolute;
@@ -120,23 +153,23 @@
             border: 1px solid #374151;
         }
         .preview-info { flex: 1; font-size: 0.85rem; color: #e5e7eb; font-weight: 500; }
-        .btn-row { display: flex; gap: 10px; }
+        .btn-row { display: flex; gap: 8px; }
         .btn {
             flex: 1;
-            padding: 13px 16px;
+            padding: 13px 10px;
             border: none;
             border-radius: 12px;
-            font-size: 0.95rem;
+            font-size: 0.88rem;
             font-weight: 600;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
+            gap: 6px;
             transition: 0.2s;
         }
         .btn-primary { background: var(--accent); color: #fff; }
-        .btn-primary:active { background: var(--accent-hover); transform: scale(0.98); }
+        .btn-instant { background: #10b981; color: #fff; }
         .btn-secondary { background: #262b36; color: #fff; border: 1px solid var(--border); }
         .btn:disabled { opacity: 0.45; pointer-events: none; }
     </style>
@@ -145,23 +178,34 @@
 
 <header>
     <h1>استوديو التحويل إلى 3D</h1>
-    <span class="badge">Native Cloud • v1.4</span>
+    <span class="badge">Hybrid 3D • v1.5</span>
 </header>
 
 <div class="viewer-container">
+    <div class="toast-banner" id="toastBanner"></div>
+
     <div class="placeholder" id="placeholderBox">
         <div class="placeholder-icon">🧊</div>
-        <p>اختر صورة واضحة لعنصر أو شخصية، وسيقوم الذكاء الاصطناعي السحابي ببناء مجسم ثلاثي الأبعاد قابل للتدوير 360 درجة.</p>
+        <p>اختر صورة، ثم اضغط <b>مجسم فوري</b> لبناء مجسم ثلاثي الأبعاد خلال ثانية واحدة، أو <b>مجسم سحابي 360°</b> للمعالجة عبر السحابة.</p>
     </div>
 
     <model-viewer id="modelViewer"
-        style="display: none;"
         camera-controls
         auto-rotate
         shadow-intensity="1"
         exposure="1.1"
         environment-image="neutral">
     </model-viewer>
+
+    <div id="local3dContainer"></div>
+
+    <div class="depth-slider-box" id="depthControlBox">
+        <div class="depth-header">
+            <span>قوة البروز ثلاثي الأبعاد (3D Depth)</span>
+            <span id="depthVal">35%</span>
+        </div>
+        <input type="range" id="depthRange" min="0" max="100" value="35">
+    </div>
 
     <div class="loader-overlay" id="loaderOverlay">
         <div class="spinner"></div>
@@ -173,23 +217,28 @@
 <div class="controls">
     <div class="preview-bar" id="previewBar">
         <img id="thumbImg" src="" alt="صورة مختارة">
-        <div class="preview-info" id="fileNameText">تم تحميل الصورة بنجاح وجاهزة للتحويل</div>
+        <div class="preview-info">الصورة جاهزة — اختر نوع التحويل بالأسفل</div>
     </div>
 
     <div class="btn-row">
         <button id="pickBtn" class="btn btn-secondary">
-            📷 اختر صورة
+            📷 صورة
         </button>
 
-        <button id="convertBtn" class="btn btn-primary" disabled>
-            ✨ تحويل إلى 3D
+        <button id="instantBtn" class="btn btn-instant" disabled>
+            ⚡ مجسم فوري
+        </button>
+
+        <button id="cloudBtn" class="btn btn-primary" disabled>
+            ☁️ سحابي 360°
         </button>
     </div>
 </div>
 
 <script>
     const pickBtn = document.getElementById('pickBtn');
-    const convertBtn = document.getElementById('convertBtn');
+    const instantBtn = document.getElementById('instantBtn');
+    const cloudBtn = document.getElementById('cloudBtn');
     const previewBar = document.getElementById('previewBar');
     const thumbImg = document.getElementById('thumbImg');
     const loaderOverlay = document.getElementById('loaderOverlay');
@@ -197,6 +246,21 @@
     const statusSub = document.getElementById('statusSub');
     const placeholderBox = document.getElementById('placeholderBox');
     const modelViewer = document.getElementById('modelViewer');
+    const local3dContainer = document.getElementById('local3dContainer');
+    const depthControlBox = document.getElementById('depthControlBox');
+    const depthRange = document.getElementById('depthRange');
+    const depthVal = document.getElementById('depthVal');
+    const toastBanner = document.getElementById('toastBanner');
+
+    let currentDataUrl = null;
+    let scene, camera, renderer, mesh, material;
+    let isDragging = false, prevX = 0, prevY = 0;
+
+    function showToast(msg) {
+        toastBanner.textContent = msg;
+        toastBanner.style.display = 'block';
+        setTimeout(() => { toastBanner.style.display = 'none'; }, 5000);
+    }
 
     pickBtn.addEventListener('click', () => {
         if (window.AndroidBridge && window.AndroidBridge.openGallery) {
@@ -204,20 +268,113 @@
         }
     });
 
-    convertBtn.addEventListener('click', () => {
-        if (window.AndroidBridge && window.AndroidBridge.start3DConversion) {
-            loaderOverlay.style.display = 'flex';
-            convertBtn.disabled = true;
-            pickBtn.disabled = true;
-            window.AndroidBridge.start3DConversion();
+    window.onImageSelectedFromAndroid = function(dataUrl) {
+        currentDataUrl = dataUrl;
+        thumbImg.src = dataUrl;
+        previewBar.style.display = 'flex';
+        instantBtn.disabled = false;
+        cloudBtn.disabled = false;
+    };
+
+    // 1. المحرك الفوري المدمج (Three.js Displacement Mesh)
+    function buildLocal3DMesh(dataUrl) {
+        placeholderBox.style.display = 'none';
+        modelViewer.style.display = 'none';
+        local3dContainer.style.display = 'block';
+        depthControlBox.style.display = 'flex';
+
+        local3dContainer.innerHTML = '';
+        const width = local3dContainer.clientWidth;
+        const height = local3dContainer.clientHeight;
+
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+        camera.position.z = 2.6;
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        local3dContainer.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        dirLight.position.set(2, 3, 4);
+        scene.add(dirLight);
+
+        const img = new Image();
+        img.onload = function() {
+            const aspect = img.width / img.height;
+            const planeW = aspect >= 1 ? 1.8 : 1.8 * aspect;
+            const planeH = aspect >= 1 ? 1.8 / aspect : 1.8;
+
+            const texture = new THREE.Texture(img);
+            texture.needsUpdate = true;
+
+            const geometry = new THREE.PlaneGeometry(planeW, planeH, 160, 160);
+            material = new THREE.MeshStandardMaterial({
+                map: texture,
+                displacementMap: texture,
+                displacementScale: 0.35,
+                roughness: 0.6,
+                metalness: 0.1,
+                side: THREE.DoubleSide
+            });
+
+            mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            function animate() {
+                requestAnimationFrame(animate);
+                if (!isDragging && mesh) {
+                    mesh.rotation.y = Math.sin(Date.now() * 0.0012) * 0.35;
+                }
+                renderer.render(scene, camera);
+            }
+            animate();
+        };
+        img.src = dataUrl;
+
+        // التحكم بالتدوير باللمس
+        const dom = renderer.domElement;
+        dom.addEventListener('touchstart', (e) => {
+            isDragging = true;
+            prevX = e.touches[0].clientX;
+            prevY = e.touches[0].clientY;
+        });
+        dom.addEventListener('touchmove', (e) => {
+            if (!isDragging || !mesh) return;
+            const dx = e.touches[0].clientX - prevX;
+            const dy = e.touches[0].clientY - prevY;
+            mesh.rotation.y += dx * 0.01;
+            mesh.rotation.x += dy * 0.01;
+            prevX = e.touches[0].clientX;
+            prevY = e.touches[0].clientY;
+        });
+        dom.addEventListener('touchend', () => { isDragging = false; });
+    }
+
+    depthRange.addEventListener('input', (e) => {
+        const val = e.target.value;
+        depthVal.textContent = val + '%';
+        if (material) {
+            material.displacementScale = (val / 100) * 0.8;
         }
     });
 
-    window.onImageSelectedFromAndroid = function(dataUrl) {
-        thumbImg.src = dataUrl;
-        previewBar.style.display = 'flex';
-        convertBtn.disabled = false;
-    };
+    instantBtn.addEventListener('click', () => {
+        if (!currentDataUrl) return;
+        buildLocal3DMesh(currentDataUrl);
+    });
+
+    cloudBtn.addEventListener('click', () => {
+        if (window.AndroidBridge && window.AndroidBridge.startCloud3D) {
+            loaderOverlay.style.display = 'flex';
+            instantBtn.disabled = true;
+            cloudBtn.disabled = true;
+            window.AndroidBridge.startCloud3D();
+        }
+    });
 
     window.updateConversionStatus = function(title, sub) {
         statusTitle.textContent = title;
@@ -226,18 +383,23 @@
 
     window.on3DModelReady = function(modelUrl) {
         loaderOverlay.style.display = 'none';
-        convertBtn.disabled = false;
-        pickBtn.disabled = false;
+        instantBtn.disabled = false;
+        cloudBtn.disabled = false;
         placeholderBox.style.display = 'none';
+        local3dContainer.style.display = 'none';
+        depthControlBox.style.display = 'none';
         modelViewer.src = modelUrl;
         modelViewer.style.display = 'block';
     };
 
-    window.onConversionError = function(errorMsg) {
+    window.activateInstantLocal3D = function(reason) {
         loaderOverlay.style.display = 'none';
-        convertBtn.disabled = false;
-        pickBtn.disabled = false;
-        alert(errorMsg);
+        instantBtn.disabled = false;
+        cloudBtn.disabled = false;
+        if (currentDataUrl) {
+            buildLocal3DMesh(currentDataUrl);
+            showToast(reason);
+        }
     };
 </script>
 
