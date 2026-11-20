@@ -1,6 +1,7 @@
 package com.rew733.imageto3d
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -40,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     private val segmenter by lazy {
         val options = SelfieSegmenterOptions.Builder()
             .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
+            .enableRawSizeMask()
             .build()
         Segmentation.getClient(options)
     }
@@ -98,14 +100,29 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun saveHfToken(token: String) {
+            getSharedPreferences("studio_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putString("hf_token", token.trim())
+                .apply()
+        }
+
+        @JavascriptInterface
+        fun getHfToken(): String {
+            return getSharedPreferences("studio_prefs", Context.MODE_PRIVATE)
+                .getString("hf_token", "") ?: ""
+        }
+
+        @JavascriptInterface
         fun startCloud3D() {
             val bytes = currentImageBytes
             if (bytes == null) {
                 sendCloudFallback("يرجى اختيار صورة أولاً.")
                 return
             }
+            val token = getHfToken()
             Thread {
-                runCloudConversion(bytes)
+                runCloudConversion(bytes, token)
             }.start()
         }
     }
@@ -119,7 +136,7 @@ class MainActivity : AppCompatActivity() {
 
                 if (originalBitmap == null) return@Thread
 
-                val maxDim = 800
+                val maxDim = 900
                 val scale = minOf(
                     maxDim.toFloat() / originalBitmap.width,
                     maxDim.toFloat() / originalBitmap.height,
@@ -139,17 +156,37 @@ class MainActivity : AppCompatActivity() {
                                 val maskWidth = segmentationMask.width
                                 val maskHeight = segmentationMask.height
 
+                                val confidences = FloatArray(maskWidth * maskHeight)
+                                maskBuffer.rewind()
+                                for (i in confidences.indices) {
+                                    confidences[i] = maskBuffer.float
+                                }
+
+                                // تمرير فلتر تآكل (Erosion) لإزالة البقايا الضيقة المحصورة بين الساقين والذراعين
+                                val eroded = FloatArray(maskWidth * maskHeight)
+                                for (y in 1 until maskHeight - 1) {
+                                    for (x in 1 until maskWidth - 1) {
+                                        val idx = y * maskWidth + x
+                                        val minNeighbor = minOf(
+                                            confidences[idx],
+                                            confidences[idx - 1],
+                                            confidences[idx + 1],
+                                            confidences[idx - maskWidth],
+                                            confidences[idx + maskWidth]
+                                        )
+                                        eroded[idx] = minNeighbor
+                                    }
+                                }
+
                                 val pixels = IntArray(maskWidth * maskHeight)
                                 scaledBitmap.getPixels(pixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
 
-                                maskBuffer.rewind()
-                                for (i in 0 until maskWidth * maskHeight) {
-                                    val foregroundConfidence = maskBuffer.float
-                                    if (foregroundConfidence < 0.55f) {
+                                for (i in pixels.indices) {
+                                    val c = eroded[i]
+                                    if (c < 0.82f) {
                                         pixels[i] = Color.TRANSPARENT
-                                    } else if (foregroundConfidence < 0.85f) {
-                                        // تنعيم حواف الجسم لمنع التعرج
-                                        val alpha = (((foregroundConfidence - 0.55f) / 0.30f) * 255).toInt().coerceIn(0, 255)
+                                    } else if (c < 0.96f) {
+                                        val alpha = (((c - 0.82f) / 0.14f) * 255).toInt().coerceIn(0, 255)
                                         val origColor = pixels[i]
                                         pixels[i] = Color.argb(
                                             alpha,
@@ -163,7 +200,6 @@ class MainActivity : AppCompatActivity() {
                                 val cutoutBitmap = Bitmap.createBitmap(maskWidth, maskHeight, Bitmap.Config.ARGB_8888)
                                 cutoutBitmap.setPixels(pixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
 
-                                // حفظ نسخة PNG مفرغة الخلفية
                                 val pngStream = ByteArrayOutputStream()
                                 cutoutBitmap.compress(Bitmap.CompressFormat.PNG, 100, pngStream)
                                 val pngBytes = pngStream.toByteArray()
@@ -201,20 +237,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun runCloudConversion(imageBytes: ByteArray) {
+    private fun runCloudConversion(imageBytes: ByteArray, hfToken: String) {
         val spaces = listOf(
             "https://tencent-hunyuan3d-2.hf.space",
+            "https://jeffreyxiang-trellis.hf.space",
             "https://vast-ai-research-triposg.hf.space",
             "https://stabilityai-triposr.hf.space"
         )
 
-        var lastError = "الخوادم السحابية المجانية مشغولة حالياً."
+        var lastError = "الخوادم السحابية مشغولة حالياً."
 
         for (spaceUrl in spaces) {
             try {
                 updateStatus("جاري الاتصال بالسحابة...", spaceUrl.removePrefix("https://"))
 
-                val uploadResult = smartUploadToGradio(spaceUrl, imageBytes)
+                val uploadResult = smartUploadToGradio(spaceUrl, imageBytes, hfToken)
                 val apiPrefix = uploadResult.first
                 val uploadedPath = uploadResult.second
 
@@ -223,18 +260,26 @@ class MainActivity : AppCompatActivity() {
                     put("meta", JSONObject().put("_type", "gradio.FileData"))
                 }
 
-                updateStatus("جاري بناء المجسم ثلاثي الأبعاد...", "قد يستغرق ذلك 15 إلى 30 ثانية")
+                updateStatus("جاري بناء المجسم 360°...", "قد يستغرق ذلك 15 إلى 35 ثانية")
 
-                val modelUrl = if (spaceUrl.contains("triposr")) {
-                    val prepData = JSONArray().put(fileObj).put(false).put(0.85)
-                    val prepRes = callGradioApi(spaceUrl, apiPrefix, "preprocess", prepData)
-                    val genData = JSONArray().put(prepRes.getJSONObject(0)).put(256)
-                    val genRes = callGradioApi(spaceUrl, apiPrefix, "generate", genData)
-                    extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
-                } else {
-                    val genData = JSONArray().put(fileObj)
-                    val genRes = callGradioApi(spaceUrl, apiPrefix, "generation_all", genData)
-                    extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
+                val modelUrl = when {
+                    spaceUrl.contains("triposr") -> {
+                        val prepData = JSONArray().put(fileObj).put(false).put(0.85)
+                        val prepRes = callGradioApi(spaceUrl, apiPrefix, "preprocess", prepData, hfToken)
+                        val genData = JSONArray().put(prepRes.getJSONObject(0)).put(256)
+                        val genRes = callGradioApi(spaceUrl, apiPrefix, "generate", genData, hfToken)
+                        extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
+                    }
+                    spaceUrl.contains("trellis") -> {
+                        val genData = JSONArray().put(fileObj)
+                        val genRes = callGradioApi(spaceUrl, apiPrefix, "image_to_3d", genData, hfToken)
+                        extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
+                    }
+                    else -> {
+                        val genData = JSONArray().put(fileObj)
+                        val genRes = callGradioApi(spaceUrl, apiPrefix, "generation_all", genData, hfToken)
+                        extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
+                    }
                 }
 
                 runOnUiThread {
@@ -248,7 +293,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        sendCloudFallback("الخوادم السحابية مزدحمة الآن ($lastError)، تم تحويل المجسم المعزول عبر المحرك الفوري.")
+        val hint = if (hfToken.isEmpty()) " (أضف مفتاح HF Token من الأعلى لتفعيل خوادم السحابة)" else ""
+        sendCloudFallback("تعذر الاتصال بالسحابة: $lastError$hint")
     }
 
     private fun extractModelUrl(spaceUrl: String, apiPrefix: String, obj: JSONObject): String {
@@ -259,7 +305,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun smartUploadToGradio(spaceUrl: String, fileBytes: ByteArray): Pair<String, String> {
+    private fun smartUploadToGradio(spaceUrl: String, fileBytes: ByteArray, hfToken: String): Pair<String, String> {
         val prefixes = listOf("/gradio_api", "")
         var lastCode = 404
 
@@ -274,6 +320,9 @@ class MainActivity : AppCompatActivity() {
                     readTimeout = 15000
                     setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
                     setRequestProperty("User-Agent", "Mozilla/5.0 (Android)")
+                    if (hfToken.isNotEmpty()) {
+                        setRequestProperty("Authorization", "Bearer $hfToken")
+                    }
                 }
 
                 DataOutputStream(conn.outputStream).use { out ->
@@ -297,7 +346,7 @@ class MainActivity : AppCompatActivity() {
         throw Exception("رمز الخادم: $lastCode")
     }
 
-    private fun callGradioApi(spaceUrl: String, apiPrefix: String, endpoint: String, dataArray: JSONArray): JSONArray {
+    private fun callGradioApi(spaceUrl: String, apiPrefix: String, endpoint: String, dataArray: JSONArray, hfToken: String): JSONArray {
         val postUrl = URL("$spaceUrl$apiPrefix/call/$endpoint")
         val postConn = (postUrl.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -306,6 +355,9 @@ class MainActivity : AppCompatActivity() {
             readTimeout = 20000
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("User-Agent", "Mozilla/5.0 (Android)")
+            if (hfToken.isNotEmpty()) {
+                setRequestProperty("Authorization", "Bearer $hfToken")
+            }
         }
 
         val payload = JSONObject().put("data", dataArray).toString()
@@ -324,6 +376,9 @@ class MainActivity : AppCompatActivity() {
             connectTimeout = 25000
             readTimeout = 90000
             setRequestProperty("User-Agent", "Mozilla/5.0 (Android)")
+            if (hfToken.isNotEmpty()) {
+                setRequestProperty("Authorization", "Bearer $hfToken")
+            }
         }
 
         BufferedReader(InputStreamReader(streamConn.inputStream)).use { reader ->
