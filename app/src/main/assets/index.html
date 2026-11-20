@@ -145,7 +145,7 @@
 
 <header>
     <h1>استوديو التحويل إلى 3D</h1>
-    <span class="badge">Cloud AI • v1.2</span>
+    <span class="badge">Cloud AI • v1.3</span>
 </header>
 
 <div class="viewer-container">
@@ -199,8 +199,8 @@
     const modelViewer = document.getElementById('modelViewer');
 
     let currentDataUrl = null;
+    const SPACE_URL = "https://stabilityai-triposr.hf.space";
 
-    // استدعاء معرض الصور عبر الجسر الأصلي للأندرويد
     pickBtn.addEventListener('click', () => {
         if (window.AndroidBridge && window.AndroidBridge.openGallery) {
             window.AndroidBridge.openGallery();
@@ -209,7 +209,6 @@
         }
     });
 
-    // الدالة التي يستدعيها كوتلن فور تجهيز الصورة
     window.onImageSelectedFromAndroid = function(dataUrl) {
         currentDataUrl = dataUrl;
         thumbImg.src = dataUrl;
@@ -217,65 +216,106 @@
         convertBtn.disabled = false;
     };
 
-    // تحويل DataURL إلى Blob لإرساله للسحابة
-    async function dataUrlToBlob(dataUrl) {
-        const res = await fetch(dataUrl);
-        return await res.blob();
+    // دالة مساعدة لاستدعاء واجهة Gradio REST API مباشرة بدون مكتبات خارجية
+    async function callGradioEndpoint(endpointName, dataArray) {
+        const postRes = await fetch(`${SPACE_URL}/gradio_api/call/${endpointName}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ data: dataArray })
+        });
+
+        if (!postRes.ok) {
+            throw new Error(`فشل الاتصال بالخادم (رمز ${postRes.status})`);
+        }
+
+        const { event_id } = await postRes.json();
+        if (!event_id) {
+            throw new Error("لم يتم استلام معرف المهمة من السحابة.");
+        }
+
+        // متابعة نتيجة المعالجة عبر SSE Stream
+        const streamRes = await fetch(`${SPACE_URL}/gradio_api/call/${endpointName}/${event_id}`);
+        const text = await streamRes.text();
+        const lines = text.split("\n");
+
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].startsWith("event: error")) {
+                throw new Error("الخادم السحابي مشغول حالياً، حاول مرة أخرى بعد قليل.");
+            }
+            if (lines[i].startsWith("event: complete") && lines[i + 1]?.startsWith("data: ")) {
+                const jsonStr = lines[i + 1].replace("data: ", "");
+                return JSON.parse(jsonStr);
+            }
+        }
+        throw new Error("انتهت مهلة الانتظار دون استلام النتيجة.");
     }
 
-    // إرسال الصورة للسحابة عند الضغط على زر التحويل
     convertBtn.addEventListener('click', async () => {
         if (!currentDataUrl) return;
 
         loaderOverlay.style.display = 'flex';
         convertBtn.disabled = true;
-        statusTitle.textContent = "جاري تحميل محرك الاتصال السحابي...";
-        statusSub.textContent = "يتم تجهيز الاتصال مع خادم الذكاء الاصطناعي";
 
         try {
-            // استيراد ديناميكي لا يعطل عمل الصفحة أبداً
-            const { Client, handle_file } = await import("https://cdn.jsdelivr.net/npm/@gradio/client@1.4.2/+esm");
+            // 1. رفع الصورة أولاً إلى خادم Hugging Face للحصول على مسار ملف سحابي
+            statusTitle.textContent = "جاري رفع الصورة إلى السحابة...";
+            statusSub.textContent = "تجهيز الصورة للمعالجة ثلاثية الأبعاد";
 
-            statusTitle.textContent = "جاري الاتصال بخادم TripoSR...";
-            statusSub.textContent = "يرجى الانتظار بضع ثوانٍ لمعالجة الصورة";
+            const blob = await (await fetch(currentDataUrl)).blob();
+            const formData = new FormData();
+            formData.append("files", blob, "input.jpg");
 
-            const imageBlob = await dataUrlToBlob(currentDataUrl);
-            const client = await Client.connect("stabilityai/TripoSR");
-
-            statusTitle.textContent = "جاري عزل العنصر وبناء المجسم...";
-            statusSub.textContent = "توليد الشبكة الثلاثية الأبعاد (3D Mesh)";
-
-            const fileObj = handle_file(imageBlob);
-            const prepResult = await client.predict("/preprocess", {
-                input_image: fileObj,
-                do_remove_background: true,
-                foreground_ratio: 0.85
+            const uploadRes = await fetch(`${SPACE_URL}/gradio_api/upload`, {
+                method: "POST",
+                body: formData
             });
 
-            const processedImage = prepResult.data[0];
-
-            statusTitle.textContent = "جاري استخراج المجسم النهائي...";
-            statusSub.textContent = "تحويل النموذج إلى صيغة GLB تفاعلية";
-
-            const genResult = await client.predict("/generate", {
-                image: processedImage,
-                mc_resolution: 256
-            });
-
-            const modelData = genResult.data[0];
-            const modelUrl = typeof modelData === 'string' ? modelData : modelData?.url;
-
-            if (!modelUrl) {
-                throw new Error("لم يتم استلام رابط المجسم من الخادم.");
+            if (!uploadRes.ok) {
+                throw new Error("تعذر رفع الصورة إلى خادم الذكاء الاصطناعي.");
             }
 
+            const uploadedPaths = await uploadRes.json();
+            const fileObj = {
+                path: uploadedPaths[0],
+                meta: { _type: "gradio.FileData" }
+            };
+
+            // 2. مرحلة عزل الخلفية
+            statusTitle.textContent = "جاري عزل العنصر من الخلفية...";
+            statusSub.textContent = "تحديد حدود الجسم بدقة";
+
+            const prepOutput = await callGradioEndpoint("preprocess", [
+                fileObj,
+                true,  // do_remove_background
+                0.85   // foreground_ratio
+            ]);
+
+            const processedFileObj = prepOutput[0];
+
+            // 3. مرحلة توليد مجسم GLB
+            statusTitle.textContent = "جاري بناء المجسم ثلاثي الأبعاد...";
+            statusSub.textContent = "قد تستغرق هذه الخطوة 10 إلى 20 ثانية";
+
+            const genOutput = await callGradioEndpoint("generate", [
+                processedFileObj,
+                256    // mc_resolution
+            ]);
+
+            const modelData = genOutput[0];
+            let modelUrl = modelData?.url || (modelData?.path ? `${SPACE_URL}/gradio_api/file=${modelData.path}` : null);
+
+            if (!modelUrl) {
+                throw new Error("لم يتم العثور على رابط المجسم الناتج.");
+            }
+
+            // عرض المجسم في العارض
             placeholderBox.style.display = 'none';
             modelViewer.src = modelUrl;
             modelViewer.style.display = 'block';
 
         } catch (err) {
             console.error(err);
-            alert("تعذر إتمام العملية سحابياً حالياً (قد يكون الخادم المجاني مزدحماً):\n" + (err.message || err));
+            alert("تنبيه:\n" + (err.message || err));
         } finally {
             loaderOverlay.style.display = 'none';
             convertBtn.disabled = false;
