@@ -87,10 +87,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun start3DConversion() {
+        fun startCloud3D() {
             val bytes = currentImageBytes
             if (bytes == null) {
-                sendError("يرجى اختيار صورة أولاً.")
+                sendCloudFallback("يرجى اختيار صورة أولاً.")
                 return
             }
             Thread {
@@ -130,50 +130,47 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             } catch (e: Exception) {
-                sendError("تعذر قراءة الصورة: ${e.localizedMessage}")
+                sendCloudFallback("تعذر قراءة الصورة: ${e.localizedMessage}")
             }
         }.start()
     }
 
     private fun runCloudConversion(imageBytes: ByteArray) {
+        // قائمة خوادم 3D النشطة على Hugging Face
         val spaces = listOf(
-            "https://stabilityai-triposr.hf.space",
-            "https://hysts-triposr.hf.space"
+            "https://tencent-hunyuan3d-2.hf.space",
+            "https://vast-ai-research-triposg.hf.space",
+            "https://stabilityai-triposr.hf.space"
         )
 
-        var lastError = "تعذر الاتصال بالخادم السحابي."
+        var lastError = "الخوادم السحابية المجانية مشغولة حالياً."
 
         for (spaceUrl in spaces) {
             try {
-                updateStatus("جاري رفع الصورة إلى الخادم السحابي...", "الاتصال بـ ${spaceUrl.removePrefix("https://")}")
+                updateStatus("جاري الاتصال بالسحابة...", spaceUrl.removePrefix("https://"))
 
-                val uploadedPath = uploadFileToGradio(spaceUrl, imageBytes)
+                val uploadResult = smartUploadToGradio(spaceUrl, imageBytes)
+                val apiPrefix = uploadResult.first
+                val uploadedPath = uploadResult.second
+
                 val fileObj = JSONObject().apply {
                     put("path", uploadedPath)
                     put("meta", JSONObject().put("_type", "gradio.FileData"))
                 }
 
-                updateStatus("جاري عزل العنصر من الخلفية...", "تحليل حدود الجسم بدقة")
-                val prepData = JSONArray().apply {
-                    put(fileObj)
-                    put(true)
-                    put(0.85)
-                }
-                val prepResult = callGradioApi(spaceUrl, "preprocess", prepData)
-                val processedFileObj = prepResult.getJSONObject(0)
+                updateStatus("جاري بناء المجسم ثلاثي الأبعاد...", "قد يستغرق ذلك 15 إلى 30 ثانية")
 
-                updateStatus("جاري بناء المجسم ثلاثي الأبعاد...", "قد يستغرق ذلك 15 إلى 25 ثانية")
-                val genData = JSONArray().apply {
-                    put(processedFileObj)
-                    put(256)
-                }
-                val genResult = callGradioApi(spaceUrl, "generate", genData)
-                val modelObj = genResult.getJSONObject(0)
-
-                val modelUrl = if (modelObj.has("url") && !modelObj.isNull("url")) {
-                    modelObj.getString("url")
+                // استدعاء التوليد المباشر حسب نوع المساحة
+                val modelUrl = if (spaceUrl.contains("triposr")) {
+                    val prepData = JSONArray().put(fileObj).put(true).put(0.85)
+                    val prepRes = callGradioApi(spaceUrl, apiPrefix, "preprocess", prepData)
+                    val genData = JSONArray().put(prepRes.getJSONObject(0)).put(256)
+                    val genRes = callGradioApi(spaceUrl, apiPrefix, "generate", genData)
+                    extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
                 } else {
-                    "$spaceUrl/gradio_api/file=${modelObj.getString("path")}"
+                    val genData = JSONArray().put(fileObj)
+                    val genRes = callGradioApi(spaceUrl, apiPrefix, "generation_all", genData)
+                    extractModelUrl(spaceUrl, apiPrefix, genRes.getJSONObject(0))
                 }
 
                 runOnUiThread {
@@ -183,51 +180,67 @@ class MainActivity : AppCompatActivity() {
                 return
 
             } catch (e: Exception) {
-                lastError = e.message ?: "خطأ غير معروف"
+                lastError = e.message ?: "خطأ في الاتصال"
             }
         }
 
-        sendError("فشلت المحاولة على جميع الخوادم المتاحة:\n$lastError")
+        // في حال انشغال جميع الخوادم السحابية، يتم تفعيل المجسم الفوري تلقائياً
+        sendCloudFallback("الخوادم السحابية مزدحمة الآن ($lastError)، تم تحويل صورتك عبر المحرك الفوري المدمج.")
     }
 
-    private fun uploadFileToGradio(spaceUrl: String, fileBytes: ByteArray): String {
-        val boundary = "Boundary-${UUID.randomUUID()}"
-        val url = URL("$spaceUrl/gradio_api/upload")
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = 25000
-            readTimeout = 25000
-            setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Android)")
+    private fun extractModelUrl(spaceUrl: String, apiPrefix: String, obj: JSONObject): String {
+        return if (obj.has("url") && !obj.isNull("url")) {
+            obj.getString("url")
+        } else {
+            "$spaceUrl$apiPrefix/file=${obj.getString("path")}"
         }
-
-        DataOutputStream(conn.outputStream).use { out ->
-            out.writeBytes("--$boundary\r\n")
-            out.writeBytes("Content-Disposition: form-data; name=\"files\"; filename=\"image.jpg\"\r\n")
-            out.writeBytes("Content-Type: image/jpeg\r\n\r\n")
-            out.write(fileBytes)
-            out.writeBytes("\r\n--$boundary--\r\n")
-            out.flush()
-        }
-
-        val code = conn.responseCode
-        if (code !in 200..299) {
-            throw Exception("رمز استجابة الرفع: $code")
-        }
-
-        val response = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
-        val jsonArray = JSONArray(response)
-        return jsonArray.getString(0)
     }
 
-    private fun callGradioApi(spaceUrl: String, endpoint: String, dataArray: JSONArray): JSONArray {
-        val postUrl = URL("$spaceUrl/gradio_api/call/$endpoint")
+    private fun smartUploadToGradio(spaceUrl: String, fileBytes: ByteArray): Pair<String, String> {
+        val prefixes = listOf("/gradio_api", "")
+        var lastCode = 404
+
+        for (prefix in prefixes) {
+            try {
+                val boundary = "Boundary-${UUID.randomUUID()}"
+                val url = URL("$spaceUrl$prefix/upload")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    connectTimeout = 15000
+                    readTimeout = 15000
+                    setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Android)")
+                }
+
+                DataOutputStream(conn.outputStream).use { out ->
+                    out.writeBytes("--$boundary\r\n")
+                    out.writeBytes("Content-Disposition: form-data; name=\"files\"; filename=\"image.jpg\"\r\n")
+                    out.writeBytes("Content-Type: image/jpeg\r\n\r\n")
+                    out.write(fileBytes)
+                    out.writeBytes("\r\n--$boundary--\r\n")
+                    out.flush()
+                }
+
+                lastCode = conn.responseCode
+                if (lastCode in 200..299) {
+                    val response = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
+                    val jsonArray = JSONArray(response)
+                    return Pair(prefix, jsonArray.getString(0))
+                }
+            } catch (_: Exception) {
+            }
+        }
+        throw Exception("رمز الخادم: $lastCode")
+    }
+
+    private fun callGradioApi(spaceUrl: String, apiPrefix: String, endpoint: String, dataArray: JSONArray): JSONArray {
+        val postUrl = URL("$spaceUrl$apiPrefix/call/$endpoint")
         val postConn = (postUrl.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
-            connectTimeout = 25000
-            readTimeout = 25000
+            connectTimeout = 20000
+            readTimeout = 20000
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("User-Agent", "Mozilla/5.0 (Android)")
         }
@@ -236,16 +249,16 @@ class MainActivity : AppCompatActivity() {
         postConn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
 
         if (postConn.responseCode !in 200..299) {
-            throw Exception("فشل طلب $endpoint (رمز ${postConn.responseCode})")
+            throw Exception("فشل الطلب ($endpoint: ${postConn.responseCode})")
         }
 
         val postResp = BufferedReader(InputStreamReader(postConn.inputStream)).use { it.readText() }
         val eventId = JSONObject(postResp).getString("event_id")
 
-        val streamUrl = URL("$spaceUrl/gradio_api/call/$endpoint/$eventId")
+        val streamUrl = URL("$spaceUrl$apiPrefix/call/$endpoint/$eventId")
         val streamConn = (streamUrl.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 30000
+            connectTimeout = 25000
             readTimeout = 90000
             setRequestProperty("User-Agent", "Mozilla/5.0 (Android)")
         }
@@ -262,16 +275,12 @@ class MainActivity : AppCompatActivity() {
                     isComplete = true
                 } else if (current.startsWith("data: ")) {
                     val dataStr = current.removePrefix("data: ")
-                    if (isError) {
-                        throw Exception("الخادم السحابي مشغول حالياً ($dataStr)")
-                    }
-                    if (isComplete) {
-                        return JSONArray(dataStr)
-                    }
+                    if (isError) throw Exception("انشغال الخادم")
+                    if (isComplete) return JSONArray(dataStr)
                 }
             }
         }
-        throw Exception("انتهى الاتصال دون استلام نتيجة مكتملة من $endpoint")
+        throw Exception("انتهت المهلة")
     }
 
     private fun updateStatus(title: String, sub: String) {
@@ -282,10 +291,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun sendError(msg: String) {
+    private fun sendCloudFallback(reason: String) {
         runOnUiThread {
-            val m = JSONObject.quote(msg)
-            webView.evaluateJavascript("window.onConversionError($m);", null)
+            val r = JSONObject.quote(reason)
+            webView.evaluateJavascript("window.activateInstantLocal3D($r);", null)
         }
     }
 
