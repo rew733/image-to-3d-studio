@@ -240,7 +240,7 @@
     <h1>استوديو التحويل إلى 3D</h1>
     <div class="header-actions">
         <button id="openTokenBtn" class="token-btn">🔑 HF Token</button>
-        <span class="badge">Solid 3D • v1.8</span>
+        <span class="badge">Volumetric 3D • v1.9</span>
     </div>
 </header>
 
@@ -249,7 +249,7 @@
 
     <div class="placeholder" id="placeholderBox">
         <div class="placeholder-icon">🧍‍♂️</div>
-        <p>اختر صورة عادية أو صورة مفرّغة الخلفية؛ سيتعرف التطبيق عليها تلقائياً ويبني مجسماً ثلاثي الأبعاد ناعماً وواضح التفاصيل.</p>
+        <p>اختر صورة عادية أو مفرّغة؛ سيقوم المحرك <b>بنفخ الحجم العضوي وبناء سُمك ثلاثي الأبعاد</b> للجسم مع تدوير 360°.</p>
     </div>
 
     <model-viewer id="modelViewer"
@@ -265,17 +265,17 @@
     <div class="depth-slider-box" id="depthControlBox">
         <div class="slider-row">
             <div class="depth-header">
-                <span>سُمك وتجسيم الجسم (Solid Relief)</span>
-                <span id="depthVal">30%</span>
+                <span>حجم وبروز الجسم (3D Volume)</span>
+                <span id="depthVal">55%</span>
             </div>
-            <input type="range" id="depthRange" min="0" max="100" value="30">
+            <input type="range" id="depthRange" min="0" max="100" value="55">
         </div>
         <div class="slider-row">
             <div class="depth-header">
                 <span>تنظيف وقص الحواف (Edge Trim)</span>
-                <span id="trimVal">45%</span>
+                <span id="trimVal">40%</span>
             </div>
-            <input type="range" id="trimRange" min="10" max="95" value="45">
+            <input type="range" id="trimRange" min="10" max="95" value="40">
         </div>
     </div>
 
@@ -289,7 +289,7 @@
 <div class="controls">
     <div class="preview-bar" id="previewBar">
         <img id="thumbImg" src="" alt="صورة معزولة">
-        <div class="preview-info">جاهز — اسحب لتدوير المجسم</div>
+        <div class="preview-info">جاهز — اسحب بإصبعك لتدوير المجسم</div>
         <button id="toggleIsolateBtn" class="isolate-toggle">عزل تلقائي: مفعّل</button>
     </div>
 
@@ -348,7 +348,8 @@
 
     let currentDataUrl = null;
     let autoIsolate = true;
-    let scene, camera, renderer, bodyGroup, frontMat, backMat;
+    let scene, camera, renderer, bodyGroup;
+    let frontMat, backMat, rimMeshes = [];
     let isDragging = false, prevX = 0, prevY = 0;
 
     function showToast(msg) {
@@ -394,14 +395,15 @@
         previewBar.style.display = 'flex';
         instantBtn.disabled = false;
         cloudBtn.disabled = false;
-        buildSolidIsolated3DMesh(dataUrl);
+        buildVolumetric3DBody(dataUrl);
     };
 
-    // توليد خريطة عمق ناعمة ومتدرجة عند الحواف لمنع التمطط الحاد
-    function createCleanBodyTextures(img, trimThreshold) {
-        const w = 260;
-        const h = Math.round((img.height / img.width) * 260);
+    // حساب خريطة الحجم العضوي (Distance Field Inflation + Surface Detail)
+    function createVolumetricTextures(img, trimThreshold) {
+        const w = 180;
+        const h = Math.round((img.height / img.width) * 180);
 
+        // 1. تنظيف الحواف للون الأساسي
         const colorCanvas = document.createElement('canvas');
         colorCanvas.width = img.width;
         colorCanvas.height = img.height;
@@ -412,48 +414,108 @@
 
         const minAlpha = Math.round((trimThreshold / 100) * 255);
         for (let i = 0; i < p.length; i += 4) {
-            if (p[i + 3] < minAlpha) {
-                p[i + 3] = 0;
-            }
+            if (p[i + 3] < minAlpha) p[i + 3] = 0;
         }
         cCtx.putImageData(cData, 0, 0);
 
-        // رسم خريطة العمق على خلفية سوداء مع تنعيم كبير لتفادي الجدران الحادة
+        // 2. مصفوفة الحجم الهندسي لبناء القبة العضوية للجسم
+        const smallCanvas = document.createElement('canvas');
+        smallCanvas.width = w;
+        smallCanvas.height = h;
+        const sCtx = smallCanvas.getContext('2d');
+        sCtx.drawImage(colorCanvas, 0, 0, w, h);
+        const sData = sCtx.getImageData(0, 0, w, h).data;
+
+        const dist = new Float32Array(w * h);
+        const lumArr = new Float32Array(w * h);
+        const INF = 9999;
+
+        for (let i = 0; i < w * h; i++) {
+            const a = sData[i * 4 + 3];
+            dist[i] = a > 100 ? INF : 0;
+            lumArr[i] = (0.299 * sData[i * 4] + 0.587 * sData[i * 4 + 1] + 0.114 * sData[i * 4 + 2]) / 255;
+        }
+
+        // تمرير ثنائي لحساب المسافة من حافة الجسم نحو مركز العضلات والجذع
+        for (let y = 1; y < h - 1; y++) {
+            for (let x = 1; x < w - 1; x++) {
+                const idx = y * w + x;
+                if (dist[idx] > 0) {
+                    dist[idx] = Math.min(
+                        dist[idx],
+                        dist[idx - 1] + 1,
+                        dist[idx - w] + 1,
+                        dist[idx - w - 1] + 1.414,
+                        dist[idx - w + 1] + 1.414
+                    );
+                }
+            }
+        }
+        for (let y = h - 2; y >= 1; y--) {
+            for (let x = w - 2; x >= 1; x--) {
+                const idx = y * w + x;
+                if (dist[idx] > 0) {
+                    dist[idx] = Math.min(
+                        dist[idx],
+                        dist[idx + 1] + 1,
+                        dist[idx + w] + 1,
+                        dist[idx + w + 1] + 1.414,
+                        dist[idx + w - 1] + 1.414
+                    );
+                }
+            }
+        }
+
+        let maxDist = 1;
+        for (let i = 0; i < dist.length; i++) {
+            if (dist[i] > maxDist) maxDist = dist[i];
+        }
+
+        // رسم خريطة العمق النهائية (تجمع بين انتفاخ الكتلة الدائري وتفاصيل العضلات)
         const depthCanvas = document.createElement('canvas');
         depthCanvas.width = w;
         depthCanvas.height = h;
         const dCtx = depthCanvas.getContext('2d');
-        dCtx.fillStyle = '#000000';
-        dCtx.fillRect(0, 0, w, h);
+        const dImg = dCtx.createImageData(w, h);
+        const dp = dImg.data;
 
-        dCtx.filter = 'blur(6px)';
-        dCtx.drawImage(colorCanvas, 0, 0, w, h);
-        dCtx.filter = 'none';
-
-        const dData = dCtx.getImageData(0, 0, w, h);
-        const dp = dData.data;
-
-        for (let i = 0; i < dp.length; i += 4) {
-            const alphaFactor = dp[i + 3] / 255;
-            const lum = (0.299 * dp[i] + 0.587 * dp[i + 1] + 0.114 * dp[i + 2]);
-            // تدرج ناعم مرتبط بالشفافية لمنع القفزات الحادة عند الأطراف
-            const depth = Math.min(255, Math.round(alphaFactor * (90 + lum * 0.65)));
-            dp[i] = depth;
-            dp[i + 1] = depth;
-            dp[i + 2] = depth;
-            dp[i + 3] = 255;
+        for (let i = 0; i < w * h; i++) {
+            if (dist[i] === 0) {
+                dp[i * 4] = 0;
+                dp[i * 4 + 1] = 0;
+                dp[i * 4 + 2] = 0;
+                dp[i * 4 + 3] = 255;
+            } else {
+                // منحنى دائري ناعم (sin/sqrt) لنفخ الجسم كتمثال حقيقي
+                const norm = Math.min(1, dist[i] / (maxDist * 0.72));
+                const dome = Math.sqrt(1 - Math.pow(1 - norm, 2));
+                const surfaceDetail = lumArr[i] * 0.22;
+                const val = Math.min(255, Math.round((dome * 0.78 + surfaceDetail) * 255));
+                dp[i * 4] = val;
+                dp[i * 4 + 1] = val;
+                dp[i * 4 + 2] = val;
+                dp[i * 4 + 3] = 255;
+            }
         }
-        dCtx.putImageData(dData, 0, 0);
+        dCtx.putImageData(dImg, 0, 0);
+
+        // تنعيم خفيف للخريطة لتفادي أي خطوط خشنة
+        const smoothDepthCanvas = document.createElement('canvas');
+        smoothDepthCanvas.width = w;
+        smoothDepthCanvas.height = h;
+        const sdCtx = smoothDepthCanvas.getContext('2d');
+        sdCtx.filter = 'blur(2px)';
+        sdCtx.drawImage(depthCanvas, 0, 0);
 
         const cleanColorTex = new THREE.CanvasTexture(colorCanvas);
         cleanColorTex.needsUpdate = true;
-        const depthTex = new THREE.CanvasTexture(depthCanvas);
+        const depthTex = new THREE.CanvasTexture(smoothDepthCanvas);
         depthTex.needsUpdate = true;
 
         return { cleanColorTex, depthTex };
     }
 
-    function buildSolidIsolated3DMesh(dataUrl) {
+    function buildVolumetric3DBody(dataUrl) {
         placeholderBox.style.display = 'none';
         modelViewer.style.display = 'none';
         local3dContainer.style.display = 'block';
@@ -465,17 +527,21 @@
 
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-        camera.position.z = 2.45;
+        camera.position.z = 2.4;
 
         renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(width, height);
         renderer.setPixelRatio(window.devicePixelRatio);
         local3dContainer.appendChild(renderer.domElement);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.92));
-        const keyLight = new THREE.DirectionalLight(0xffffff, 0.55);
-        keyLight.position.set(2, 3, 4);
+        // إضاءة نحتية لإبراز الانحناءات والعضلات
+        scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 0.85);
+        keyLight.position.set(2.5, 3, 3.5);
         scene.add(keyLight);
+        const rimLight = new THREE.DirectionalLight(0x60a5fa, 0.55);
+        rimLight.position.set(-2.5, 1, -2.5);
+        scene.add(rimLight);
 
         const img = new Image();
         img.onload = function() {
@@ -484,8 +550,8 @@
             const planeH = aspect >= 1 ? 1.85 / aspect : 1.85;
 
             const trimValNum = parseInt(trimRange.value, 10);
-            const { cleanColorTex, depthTex } = createCleanBodyTextures(img, trimValNum);
-            const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.55;
+            const { cleanColorTex, depthTex } = createVolumetricTextures(img, trimValNum);
+            const scaleVal = (parseInt(depthRange.value, 10) / 100) * 0.65;
 
             const geometry = new THREE.PlaneGeometry(planeW, planeH, 160, 160);
 
@@ -495,32 +561,54 @@
                 displacementScale: scaleVal,
                 transparent: true,
                 alphaTest: 0.45,
-                roughness: 0.65,
-                metalness: 0.05,
+                roughness: 0.5,
+                metalness: 0.08,
                 side: THREE.FrontSide
             });
 
             backMat = new THREE.MeshStandardMaterial({
                 map: cleanColorTex,
-                color: 0x9ca3af,
+                color: 0x7c8594,
                 displacementMap: depthTex,
                 displacementScale: -scaleVal,
                 transparent: true,
                 alphaTest: 0.45,
-                roughness: 0.85,
+                roughness: 0.8,
                 metalness: 0.05,
                 side: THREE.BackSide
             });
 
             bodyGroup = new THREE.Group();
+            rimMeshes = [];
+
+            // الوجه الأمامي والخلفي
             bodyGroup.add(new THREE.Mesh(geometry, frontMat));
             bodyGroup.add(new THREE.Mesh(geometry, backMat));
+
+            // بناء جدار سُمك جانبي مغلق من 8 طبقات متدرجة بين الأمام والخلف
+            const shellGeo = new THREE.PlaneGeometry(planeW, planeH, 60, 60);
+            const layers = 8;
+            for (let i = 1; i < layers; i++) {
+                const factor = 1 - (2 * i / layers);
+                const shellMat = new THREE.MeshBasicMaterial({
+                    map: cleanColorTex,
+                    color: 0x4b5563,
+                    transparent: true,
+                    alphaTest: 0.5,
+                    side: THREE.DoubleSide
+                });
+                const shellMesh = new THREE.Mesh(shellGeo, shellMat);
+                shellMesh.position.z = factor * (scaleVal * 0.35);
+                rimMeshes.push({ mesh: shellMesh, factor });
+                bodyGroup.add(shellMesh);
+            }
+
             scene.add(bodyGroup);
 
             function animate() {
                 requestAnimationFrame(animate);
                 if (!isDragging && bodyGroup) {
-                    bodyGroup.rotation.y = Math.sin(Date.now() * 0.0014) * 0.42;
+                    bodyGroup.rotation.y = Math.sin(Date.now() * 0.0015) * 0.52;
                 }
                 renderer.render(scene, camera);
             }
@@ -538,8 +626,8 @@
             if (!isDragging || !bodyGroup) return;
             const dx = e.touches[0].clientX - prevX;
             const dy = e.touches[0].clientY - prevY;
-            bodyGroup.rotation.y += dx * 0.01;
-            bodyGroup.rotation.x += dy * 0.01;
+            bodyGroup.rotation.y += dx * 0.012;
+            bodyGroup.rotation.x += dy * 0.012;
             prevX = e.touches[0].clientX;
             prevY = e.touches[0].clientY;
         });
@@ -549,9 +637,12 @@
     depthRange.addEventListener('input', (e) => {
         const val = e.target.value;
         depthVal.textContent = val + '%';
-        const s = (val / 100) * 0.55;
+        const s = (val / 100) * 0.65;
         if (frontMat) frontMat.displacementScale = s;
         if (backMat) backMat.displacementScale = -s;
+        rimMeshes.forEach(item => {
+            item.mesh.position.z = item.factor * (s * 0.35);
+        });
     });
 
     trimRange.addEventListener('input', (e) => {
@@ -559,12 +650,12 @@
     });
 
     trimRange.addEventListener('change', () => {
-        if (currentDataUrl) buildSolidIsolated3DMesh(currentDataUrl);
+        if (currentDataUrl) buildVolumetric3DBody(currentDataUrl);
     });
 
     instantBtn.addEventListener('click', () => {
         if (!currentDataUrl) return;
-        buildSolidIsolated3DMesh(currentDataUrl);
+        buildVolumetric3DBody(currentDataUrl);
     });
 
     cloudBtn.addEventListener('click', () => {
@@ -597,7 +688,7 @@
         instantBtn.disabled = false;
         cloudBtn.disabled = false;
         if (currentDataUrl) {
-            buildSolidIsolated3DMesh(currentDataUrl);
+            buildVolumetric3DBody(currentDataUrl);
             showToast(reason);
         }
     };
