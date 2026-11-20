@@ -37,6 +37,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var pickMediaLauncher: ActivityResultLauncher<PickVisualMediaRequest>
     private var currentImageBytes: ByteArray? = null
+    private var lastSelectedUri: Uri? = null
+    private var autoIsolateEnabled: Boolean = true
 
     private val segmenter by lazy {
         val options = SelfieSegmenterOptions.Builder()
@@ -54,7 +56,8 @@ class MainActivity : AppCompatActivity() {
             ActivityResultContracts.PickVisualMedia()
         ) { uri: Uri? ->
             if (uri != null) {
-                processAndIsolateSubject(uri)
+                lastSelectedUri = uri
+                processSelectedImage(uri)
             }
         }
 
@@ -100,6 +103,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun setAutoIsolate(enabled: Boolean) {
+            autoIsolateEnabled = enabled
+            lastSelectedUri?.let { processSelectedImage(it) }
+        }
+
+        @JavascriptInterface
         fun saveHfToken(token: String) {
             getSharedPreferences("studio_prefs", Context.MODE_PRIVATE)
                 .edit()
@@ -127,7 +136,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun processAndIsolateSubject(uri: Uri) {
+    private fun processSelectedImage(uri: Uri) {
         Thread {
             try {
                 val inputStream = contentResolver.openInputStream(uri)
@@ -146,6 +155,15 @@ class MainActivity : AppCompatActivity() {
                 val newHeight = (originalBitmap.height * scale).toInt()
                 val scaledBitmap = Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
 
+                // فحص ذكي: هل الصورة مفرغة مسبقاً (شفافة) أو ذات خلفية بيضاء صماء؟
+                val alreadyIsolated = isAlreadyCutoutOrPlainBg(scaledBitmap)
+
+                if (!autoIsolateEnabled || alreadyIsolated) {
+                    val cleanBitmap = removePureWhiteCornersIfNeeded(scaledBitmap)
+                    sendBitmapToWebView(cleanBitmap)
+                    return@Thread
+                }
+
                 val inputImage = InputImage.fromBitmap(scaledBitmap, 0)
 
                 segmenter.process(inputImage)
@@ -158,35 +176,29 @@ class MainActivity : AppCompatActivity() {
 
                                 val confidences = FloatArray(maskWidth * maskHeight)
                                 maskBuffer.rewind()
+                                var foregroundCount = 0
                                 for (i in confidences.indices) {
-                                    confidences[i] = maskBuffer.float
+                                    val c = maskBuffer.float
+                                    confidences[i] = c
+                                    if (c > 0.7f) foregroundCount++
                                 }
 
-                                // تمرير فلتر تآكل (Erosion) لإزالة البقايا الضيقة المحصورة بين الساقين والذراعين
-                                val eroded = FloatArray(maskWidth * maskHeight)
-                                for (y in 1 until maskHeight - 1) {
-                                    for (x in 1 until maskWidth - 1) {
-                                        val idx = y * maskWidth + x
-                                        val minNeighbor = minOf(
-                                            confidences[idx],
-                                            confidences[idx - 1],
-                                            confidences[idx + 1],
-                                            confidences[idx - maskWidth],
-                                            confidences[idx + maskWidth]
-                                        )
-                                        eroded[idx] = minNeighbor
-                                    }
+                                // إذا فشل النموذج وعكس القناع (أقل من 3% أو أكثر من 92% من الصورة)، نستخدم الصورة الأصلية
+                                val ratio = foregroundCount.toFloat() / confidences.size
+                                if (ratio < 0.03f || ratio > 0.92f) {
+                                    sendBitmapToWebView(scaledBitmap)
+                                    return@Thread
                                 }
 
                                 val pixels = IntArray(maskWidth * maskHeight)
                                 scaledBitmap.getPixels(pixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
 
                                 for (i in pixels.indices) {
-                                    val c = eroded[i]
-                                    if (c < 0.82f) {
+                                    val c = confidences[i]
+                                    if (c < 0.72f) {
                                         pixels[i] = Color.TRANSPARENT
-                                    } else if (c < 0.96f) {
-                                        val alpha = (((c - 0.82f) / 0.14f) * 255).toInt().coerceIn(0, 255)
+                                    } else if (c < 0.90f) {
+                                        val alpha = (((c - 0.72f) / 0.18f) * 255).toInt().coerceIn(0, 255)
                                         val origColor = pixels[i]
                                         pixels[i] = Color.argb(
                                             alpha,
@@ -199,25 +211,15 @@ class MainActivity : AppCompatActivity() {
 
                                 val cutoutBitmap = Bitmap.createBitmap(maskWidth, maskHeight, Bitmap.Config.ARGB_8888)
                                 cutoutBitmap.setPixels(pixels, 0, maskWidth, 0, 0, maskWidth, maskHeight)
+                                sendBitmapToWebView(cutoutBitmap)
 
-                                val pngStream = ByteArrayOutputStream()
-                                cutoutBitmap.compress(Bitmap.CompressFormat.PNG, 100, pngStream)
-                                val pngBytes = pngStream.toByteArray()
-                                currentImageBytes = pngBytes
-
-                                val base64String = Base64.encodeToString(pngBytes, Base64.NO_WRAP)
-                                val dataUrl = "data:image/png;base64,$base64String"
-
-                                runOnUiThread {
-                                    webView.evaluateJavascript("window.onImageSelectedFromAndroid('$dataUrl');", null)
-                                }
                             } catch (e: Exception) {
-                                fallbackSendOriginal(scaledBitmap)
+                                sendBitmapToWebView(scaledBitmap)
                             }
                         }.start()
                     }
                     .addOnFailureListener {
-                        fallbackSendOriginal(scaledBitmap)
+                        sendBitmapToWebView(scaledBitmap)
                     }
             } catch (e: Exception) {
                 sendCloudFallback("تعذر قراءة الصورة: ${e.localizedMessage}")
@@ -225,7 +227,58 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun fallbackSendOriginal(bitmap: Bitmap) {
+    // يفحص زوايا الصورة لمعرفة إن كانت شفافة مسبقاً أو ذات خلفية بيضاء صماء
+    private fun isAlreadyCutoutOrPlainBg(bmp: Bitmap): Boolean {
+        val w = bmp.width
+        val h = bmp.height
+        val samplePoints = listOf(
+            bmp.getPixel(2, 2),
+            bmp.getPixel(w - 3, 2),
+            bmp.getPixel(2, h - 3),
+            bmp.getPixel(w - 3, h - 3),
+            bmp.getPixel(w / 2, 2)
+        )
+        val transparentCorners = samplePoints.count { Color.alpha(it) < 50 }
+        if (transparentCorners >= 3) return true
+
+        val pureWhiteCorners = samplePoints.count {
+            Color.red(it) > 245 && Color.green(it) > 245 && Color.blue(it) > 245
+        }
+        return pureWhiteCorners >= 4
+    }
+
+    // يحوّل الخلفية البيضاء الصماء إلى شفافية حقيقية إذا رفع المستخدم صورة مفرغة بخلفية بيضاء
+    private fun removePureWhiteCornersIfNeeded(bmp: Bitmap): Bitmap {
+        val w = bmp.width
+        val h = bmp.height
+        val pixels = IntArray(w * h)
+        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        var hasTransparency = false
+        for (i in pixels.indices step 20) {
+            if (Color.alpha(pixels[i]) < 50) {
+                hasTransparency = true
+                break
+            }
+        }
+        if (hasTransparency) return bmp
+
+        val topLeft = pixels[0]
+        if (Color.red(topLeft) > 245 && Color.green(topLeft) > 245 && Color.blue(topLeft) > 245) {
+            for (i in pixels.indices) {
+                val p = pixels[i]
+                if (Color.red(p) > 242 && Color.green(p) > 242 && Color.blue(p) > 242) {
+                    pixels[i] = Color.TRANSPARENT
+                }
+            }
+            val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            out.setPixels(pixels, 0, w, 0, 0, w, h)
+            return out
+        }
+        return bmp
+    }
+
+    private fun sendBitmapToWebView(bitmap: Bitmap) {
         val outputStream = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
         val byteArray = outputStream.toByteArray()
